@@ -149,7 +149,7 @@ Lo que valida el **servidor** (no se puede saltar desde el navegador): precios y
 > La cadena de conexión es una **contraseña**: va en las variables de entorno de Vercel, nunca en el código ni en GitHub (`.env` está en `.gitignore`).
 > Para la defensa el administrador es `admin` / `admin`; **en producción cámbiala** (paso 2).
 
-Para probar en tu computadora con la API incluida: `npx vercel dev` (con un `.env` basado en `.env.example`). `npm run dev` solo levanta la interfaz (sin API se ve el catálogo de respaldo).
+Para probar en tu computadora con la API incluida: `npx vercel dev` (con un `.env` basado en `.env.example`). `npm run dev` levanta la interfaz y reenvía `/api` a la página ya desplegada (ver `vite.config.ts`), así que el login, los builds y los pedidos también funcionan en local siempre que la página de Vercel ya tenga la API y `DATABASE_URL`.
 
 ## Panel de administración
 

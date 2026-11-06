@@ -318,7 +318,7 @@ export default function App() {
         onDownloadBudget={() => { setCheckoutOpen(false); setSaveDialogOpen(true); }} />
 
       <SaveBudgetDialog open={saveDialogOpen} onOpenChange={setSaveDialogOpen} build={build}
-        onSave={(email) => console.log('Presupuesto para', email)} username={session?.name} defaultEmail={session?.email} />
+        username={session?.name} defaultEmail={session?.email} />
     </div>
   );
 }

@@ -1,59 +1,133 @@
-import { useState, useRef } from 'react';
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from './ui/dialog';
-import { Input } from './ui/input';
-import { Label } from './ui/label';
-import { Button } from './ui/button';
-import { Mail, Download, CheckCircle, Image, FileText, Loader2 } from 'lucide-react';
+import { useEffect, useRef, useState } from 'react';
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from './ui/dialog';
+import { Mail, Image as ImageIcon, FileText, Loader2, Share2, ExternalLink, Info } from 'lucide-react';
 import { PCBuild } from '../types/pc-component';
 import { BuildBanner } from './BuildBanner';
 import { toPng } from 'html-to-image';
 import jsPDF from 'jspdf';
-import { TAX_RATE } from '../data/store-info';
+import { STORE, TAX_RATE } from '../data/store-info';
+import { fmtBs, useBcv } from '../lib/bcv';
+import { track } from '../lib/stats';
 import { toast } from 'sonner';
 
 interface SaveBudgetDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   build: PCBuild;
-  onSave: (email: string) => void;
+  onSave?: (email: string) => void;
   username?: string;
   defaultEmail?: string;
 }
 
-export function SaveBudgetDialog({ open, onOpenChange, build, onSave, username, defaultEmail }: SaveBudgetDialogProps) {
+const LABELS: Array<[string, string]> = [
+  ['cpu', 'Procesador'], ['motherboard', 'Placa base'], ['ram', 'Memoria RAM'], ['gpu', 'Tarjeta gráfica'],
+  ['storage', 'Almacenamiento'], ['power', 'Fuente de poder'], ['case', 'Case'],
+];
+const BANNER_W = 1000;
+const BANNER_H = 560;
+const FILE_NAME = 'mi-build-twentyseventech';
+
+export function SaveBudgetDialog({ open, onOpenChange, build, username, defaultEmail }: SaveBudgetDialogProps) {
   const [email, setEmail] = useState(defaultEmail ?? '');
-  const [saved, setSaved] = useState(false);
-  const [loadingPng, setLoadingPng] = useState(false);
-  const [loadingPdf, setLoadingPdf] = useState(false);
+  const [busy, setBusy] = useState<'png' | 'pdf' | 'mail' | 'share' | null>(null);
+  const [emailHint, setEmailHint] = useState('');
   const bannerRef = useRef<HTMLDivElement>(null);
+  const rate = useBcv();
+
+  // La vista previa se escala al ancho disponible (sirve en celular y en computadora).
+  const [box, setBox] = useState<HTMLDivElement | null>(null);
+  const [scale, setScale] = useState(0.5);
+  useEffect(() => {
+    if (!box) return;
+    const fit = () => setScale(Math.min(1, box.clientWidth / BANNER_W));
+    fit();
+    const ro = new ResizeObserver(fit);
+    ro.observe(box);
+    return () => ro.disconnect();
+  }, [box]);
+  useEffect(() => { if (open) setEmail((e) => e || defaultEmail || ''); }, [open, defaultEmail]);
+
+  const subtotal = build.totalPrice;
+  const totalUsd = subtotal * (1 + TAX_RATE);
 
   const captureBanner = async (): Promise<string> => {
     if (!bannerRef.current) throw new Error('Banner not ready');
-    return toPng(bannerRef.current, {
-      pixelRatio: 2,
-      cacheBust: true,
-      backgroundColor: '#080808',
-    });
+    return toPng(bannerRef.current, { pixelRatio: 2, cacheBust: true, backgroundColor: '#080808' });
+  };
+  const captureBlob = async (): Promise<Blob> => (await fetch(await captureBanner())).blob();
+
+  const summaryText = () => {
+    const lines = LABELS.map(([cat, label]) => {
+      const c = build.components[cat as keyof typeof build.components];
+      return c ? `• ${label}: ${c.name} — $${c.price}` : null;
+    }).filter(Boolean).join('\n');
+    const bs = rate ? `\n(≈ ${fmtBs(totalUsd * rate.rate)} a tasa BCV ${rate.rate.toFixed(2)})` : '';
+    return `Mi PC armada en ${STORE.name}\n\n${lines}\n\nSubtotal: $${subtotal.toFixed(2)}\nIVA (${Math.round(TAX_RATE * 100)}%): $${(subtotal * TAX_RATE).toFixed(2)}\nTotal: $${totalUsd.toFixed(2)}${bs}\n\nPrecios referenciales; existencias y precio final se confirman con la tienda.\n${STORE.instagramUrl ?? ''}`;
   };
 
   const handleDownloadPng = async () => {
-    setLoadingPng(true);
+    setBusy('png');
     try {
-      const dataUrl = await captureBanner();
       const link = document.createElement('a');
-      link.download = 'mi-build-twentyseventech.png';
-      link.href = dataUrl;
+      link.download = `${FILE_NAME}.png`;
+      link.href = await captureBanner();
       link.click();
-      toast.success('Banner descargado como PNG');
-    } catch {
-      toast.error('Error al generar la imagen');
-    } finally {
-      setLoadingPng(false);
-    }
+      track('banner');
+      toast.success('Imagen descargada');
+    } catch { toast.error('No se pudo generar la imagen'); }
+    finally { setBusy(null); }
+  };
+
+  /** Comparte la imagen con las apps del teléfono/PC (Gmail, WhatsApp...) si el navegador lo permite. */
+  const handleShare = async () => {
+    setBusy('share');
+    try {
+      const file = new File([await captureBlob()], `${FILE_NAME}.png`, { type: 'image/png' });
+      if (navigator.canShare?.({ files: [file] })) {
+        await navigator.share({ files: [file], title: `Mi PC en ${STORE.name}`, text: summaryText() });
+        track('banner');
+      } else {
+        toast.info('Tu navegador no permite compartir archivos. Usa «Descargar imagen».');
+      }
+    } catch (e) {
+      if (!(e instanceof DOMException && e.name === 'AbortError')) toast.error('No se pudo compartir');
+    } finally { setBusy(null); }
+  };
+
+  /**
+   * Correo: un navegador no puede adjuntar archivos por sí solo, así que:
+   *  - en celular abre el menú de compartir con la imagen ya adjunta (elige Gmail);
+   *  - en computadora descarga la imagen y abre el correo ya redactado para que la adjuntes.
+   */
+  const handleEmail = async (useMailApp = false) => {
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) { setEmailHint('Escribe un correo válido.'); return; }
+    setEmailHint(''); setBusy('mail');
+    try {
+      const blob = await captureBlob();
+      const file = new File([blob], `${FILE_NAME}.png`, { type: 'image/png' });
+      if (!useMailApp && navigator.canShare?.({ files: [file] })) {
+        try {
+          await navigator.share({ files: [file], title: `Mi PC en ${STORE.name}`, text: summaryText() });
+          track('banner');
+          return;
+        } catch (e) { if (e instanceof DOMException && e.name === 'AbortError') return; }
+      }
+      const a = document.createElement('a');
+      a.download = `${FILE_NAME}.png`; a.href = URL.createObjectURL(blob); a.click();
+      setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+      const subject = encodeURIComponent(`Mi PC armada en ${STORE.name}`);
+      const body = encodeURIComponent(`${summaryText()}\n\n(Adjunta aquí la imagen ${FILE_NAME}.png que se descargó)`);
+      const to = encodeURIComponent(email.trim());
+      if (useMailApp) window.location.href = `mailto:${email.trim()}?subject=${subject}&body=${body}`;
+      else window.open(`https://mail.google.com/mail/?view=cm&fs=1&to=${to}&su=${subject}&body=${body}`, '_blank', 'noopener');
+      track('banner');
+      toast.success('Imagen descargada y correo preparado', { description: 'Adjunta la imagen descargada y pulsa Enviar.' });
+    } catch { toast.error('No se pudo preparar el correo'); }
+    finally { setBusy(null); }
   };
 
   const handleDownloadPdf = async () => {
-    setLoadingPdf(true);
+    setBusy('pdf');
     try {
       const dataUrl = await captureBanner();
 
@@ -186,123 +260,82 @@ export function SaveBudgetDialog({ open, onOpenChange, build, onSave, username, 
       pdf.text('twentyseventech.com', W / 2, 291, { align: 'center' });
 
       pdf.save('mi-build-twentyseventech.pdf');
+      track('banner');
       toast.success('PDF descargado correctamente');
     } catch (err) {
       console.error(err);
       toast.error('Error al generar el PDF');
     } finally {
-      setLoadingPdf(false);
+      setBusy(null);
     }
   };
 
-  const handleSave = () => {
-    if (!email) return;
-    onSave(email);
-    setSaved(true);
-    setTimeout(() => {
-      setSaved(false);
-      setEmail('');
-      onOpenChange(false);
-    }, 2500);
-  };
+  const btn = 'flex h-12 items-center justify-center gap-2 px-4 text-sm font-semibold transition disabled:opacity-50';
+  const disabled = busy !== null;
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="bg-gray-950 border-gray-800 text-white max-w-4xl p-0 overflow-hidden">
-        {!saved ? (
-          <div className="flex flex-col">
-            {/* Header */}
-            <div className="px-6 py-4 border-b border-gray-800">
-              <DialogTitle className="text-xl text-white">Compartir tu Build</DialogTitle>
-              <p className="text-gray-400 text-sm mt-1">
-                Descarga tu banner personalizado o guarda el presupuesto completo en PDF
-              </p>
-            </div>
+      <DialogContent className="max-h-[94vh] overflow-y-auto !rounded-none border-white/20 bg-black p-0 text-white sm:max-w-3xl [&>button]:text-white">
+        <DialogHeader className="border-b border-white/15 p-5 text-left sm:p-6">
+          <DialogTitle className="font-display text-3xl text-white sm:text-4xl">Tu presupuesto</DialogTitle>
+          <DialogDescription className="text-gray-400">
+            Descarga la imagen o el PDF, o envíatelo por correo.
+          </DialogDescription>
+        </DialogHeader>
 
-            {/* Banner preview — rendered at full size, scaled with CSS */}
-            <div className="px-6 pt-5 pb-2">
-              <p className="text-xs text-gray-500 uppercase tracking-widest mb-3">Vista previa del banner</p>
-              <div className="overflow-hidden rounded-lg border border-gray-800 bg-black" style={{ height: '280px' }}>
-                <div style={{ transform: 'scale(0.5)', transformOrigin: 'top left', width: '200%', height: '200%', pointerEvents: 'none' }}>
-                  <BuildBanner ref={bannerRef} build={build} username={username} />
-                </div>
-              </div>
-            </div>
-
-            {/* Download actions */}
-            <div className="px-6 pb-4">
-              <div className="flex gap-3">
-                <Button
-                  onClick={handleDownloadPng}
-                  disabled={loadingPng || loadingPdf}
-                  className="flex-1 bg-red-600 hover:bg-red-700 text-white h-11"
-                >
-                  {loadingPng
-                    ? <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                    : <Image className="w-4 h-4 mr-2" />
-                  }
-                  Descargar Banner PNG
-                </Button>
-                <Button
-                  onClick={handleDownloadPdf}
-                  disabled={loadingPng || loadingPdf}
-                  variant="outline"
-                  className="flex-1 border-red-600 text-red-400 hover:bg-red-600/10 h-11"
-                >
-                  {loadingPdf
-                    ? <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                    : <FileText className="w-4 h-4 mr-2" />
-                  }
-                  Descargar PDF Completo
-                </Button>
-              </div>
-            </div>
-
-            {/* Divider */}
-            <div className="mx-6 border-t border-gray-800 mb-4" />
-
-            {/* Email save */}
-            <div className="px-6 pb-6 space-y-3">
-              <p className="text-xs text-gray-500 uppercase tracking-widest">O recíbelo en tu correo</p>
-              <div className="flex gap-3">
-                <div className="relative flex-1">
-                  <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-                  <Input
-                    type="email"
-                    placeholder="tu@email.com"
-                    value={email}
-                    onChange={(e) => setEmail(e.target.value)}
-                    onKeyDown={(e) => e.key === 'Enter' && handleSave()}
-                    className="pl-10 bg-gray-900 border-gray-700 text-white placeholder:text-gray-500 focus:border-red-600 h-11"
-                  />
-                </div>
-                <Button
-                  onClick={handleSave}
-                  disabled={!email}
-                  className="bg-gray-800 hover:bg-gray-700 text-white border border-gray-700 h-11 px-5"
-                >
-                  <Download className="w-4 h-4 mr-2" />
-                  Enviar
-                </Button>
-              </div>
-            </div>
-          </div>
-        ) : (
-          <div className="py-14 text-center space-y-4 px-8">
-            <div className="flex justify-center">
-              <div className="w-16 h-16 bg-green-500/20 rounded-full flex items-center justify-center">
-                <CheckCircle className="w-10 h-10 text-green-400" />
-              </div>
-            </div>
+        <div className="space-y-5 p-5 sm:p-6">
+          <div className="flex flex-wrap items-end justify-between gap-3 border border-white/15 px-4 py-3">
             <div>
-              <h3 className="text-2xl text-white mb-2">¡Presupuesto Enviado!</h3>
-              <p className="text-gray-400 leading-relaxed">
-                Te enviamos el presupuesto a{' '}
-                <span className="text-red-400">{email}</span> con el banner y el PDF descargable.
-              </p>
+              <p className="text-xs uppercase tracking-widest text-gray-500">Total con IVA</p>
+              <p className="font-display text-4xl text-[var(--t27-red)]">${totalUsd.toFixed(2)}</p>
+            </div>
+            {rate && <p className="text-right text-sm text-gray-300">≈ {fmtBs(totalUsd * rate.rate)}<span className="block text-xs text-gray-500">Tasa BCV {rate.rate.toFixed(2)}</span></p>}
+          </div>
+
+          <div>
+            <p className="mb-2 text-xs uppercase tracking-widest text-gray-500">Vista previa</p>
+            <div ref={setBox} className="w-full overflow-hidden border border-white/15 bg-black" style={{ height: BANNER_H * scale }}>
+              <div style={{ width: BANNER_W, height: BANNER_H, transform: `scale(${scale})`, transformOrigin: 'top left', pointerEvents: 'none' }}>
+                <BuildBanner ref={bannerRef} build={build} username={username} />
+              </div>
             </div>
           </div>
-        )}
+
+          <div className="grid gap-2 sm:grid-cols-3">
+            <button onClick={handleDownloadPng} disabled={disabled} className={`${btn} cut bg-[var(--t27-red)] text-white hover:bg-red-500`}>
+              {busy === 'png' ? <Loader2 className="h-4 w-4 animate-spin" /> : <ImageIcon className="h-4 w-4" />} Descargar imagen
+            </button>
+            <button onClick={handleDownloadPdf} disabled={disabled} className={`${btn} border border-white/30 hover:bg-white hover:text-black`}>
+              {busy === 'pdf' ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileText className="h-4 w-4" />} Descargar PDF
+            </button>
+            <button onClick={handleShare} disabled={disabled} className={`${btn} border border-white/30 hover:bg-white hover:text-black`}>
+              {busy === 'share' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Share2 className="h-4 w-4" />} Compartir
+            </button>
+          </div>
+
+          <div className="border border-white/15 p-4">
+            <p className="flex items-center gap-2 text-sm font-semibold"><Mail className="h-4 w-4 text-[var(--t27-red)]" /> Enviar la imagen a un correo</p>
+            <div className="mt-3 flex flex-col gap-2 sm:flex-row">
+              <input
+                type="email" inputMode="email" autoComplete="email" placeholder="tucorreo@gmail.com" value={email}
+                onChange={(e) => { setEmail(e.target.value); setEmailHint(''); }}
+                onKeyDown={(e) => e.key === 'Enter' && handleEmail()}
+                className="h-12 w-full border border-white/20 bg-black px-3 text-sm text-white outline-none placeholder:text-gray-500 focus:border-[var(--t27-red)]"
+              />
+              <button onClick={() => handleEmail()} disabled={disabled} className={`${btn} cut shrink-0 bg-white text-black hover:bg-gray-200`}>
+                {busy === 'mail' ? <Loader2 className="h-4 w-4 animate-spin" /> : <ExternalLink className="h-4 w-4" />} Preparar correo
+              </button>
+            </div>
+            {emailHint && <p role="alert" className="mt-2 text-sm text-red-300">{emailHint}</p>}
+            <p className="mt-3 flex gap-2 text-xs leading-relaxed text-gray-500">
+              <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+              <span>
+                En el celular se abre el menú de compartir con la imagen ya adjunta (elige Gmail). En computadora se descarga la imagen y se abre Gmail con el mensaje listo: solo adjunta la imagen y envía.{' '}
+                <button type="button" onClick={() => handleEmail(true)} disabled={disabled} className="underline underline-offset-2 hover:text-white">Usar mi app de correo</button>
+              </span>
+            </p>
+          </div>
+        </div>
       </DialogContent>
     </Dialog>
   );

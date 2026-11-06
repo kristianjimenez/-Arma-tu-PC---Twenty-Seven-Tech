@@ -26,6 +26,13 @@ export default defineConfig({
     react(),
     tailwindcss(),
   ],
+  // `npm run dev` no incluye la API: se reenvían las llamadas /api a la página ya desplegada
+  // (que está conectada a PostgreSQL), así el login, los builds y los pedidos también funcionan en local.
+  server: {
+    proxy: {
+      '/api': { target: 'https://arma-tu-pc-twenty-seven-tech.vercel.app', changeOrigin: true, secure: true },
+    },
+  },
   resolve: {
     alias: {
       '@': path.resolve(__dirname, './src/app'),
