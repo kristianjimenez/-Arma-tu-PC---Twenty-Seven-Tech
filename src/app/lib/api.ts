@@ -21,6 +21,6 @@ export async function api<T = unknown>(path: string, opts: { method?: string; bo
   }
   let data: any = null;
   try { data = await res.json(); } catch { /* respuesta vacía */ }
-  if (!res.ok) throw new ApiError(res.status, data?.error ?? 'Ocurrió un error. Intenta de nuevo.');
+  if (!res.ok) throw new ApiError(res.status, data?.error ?? `Respuesta inesperada del servidor (código ${res.status}).`);
   return data as T;
 }

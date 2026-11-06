@@ -7,18 +7,18 @@ let versions: Record<string, number> = {};
 export function setImageVersions(map: Record<string, number>) { versions = map; window.dispatchEvent(new Event('t27-images')); }
 
 /** URL de la imagen guardada en la base de datos (con la versión para refrescar la caché al cambiarla). */
-export function getImage(id: string): string | undefined { return versions[id] ? `/api/imagen/${encodeURIComponent(id)}?v=${versions[id]}` : undefined; }
+export function getImage(id: string): string | undefined { return versions[id] ? `/api/imagen?id=${encodeURIComponent(id)}&v=${versions[id]}` : undefined; }
 export function readImages(): Record<string, string> {
   return Object.fromEntries(Object.keys(versions).map((id) => [id, getImage(id)!]));
 }
 
 export async function uploadImage(id: string, dataUrl: string) {
-  await api(`imagen/${encodeURIComponent(id)}`, { method: 'PUT', body: { dataUrl } });
+  await api(`imagen?id=${encodeURIComponent(id)}`, { method: 'PUT', body: { dataUrl } });
   versions = { ...versions, [id]: Date.now() };
   window.dispatchEvent(new Event('t27-images'));
 }
 export async function removeImage(id: string) {
-  await api(`imagen/${encodeURIComponent(id)}`, { method: 'DELETE' });
+  await api(`imagen?id=${encodeURIComponent(id)}`, { method: 'DELETE' });
   const { [id]: _gone, ...rest } = versions;
   versions = rest;
   window.dispatchEvent(new Event('t27-images'));

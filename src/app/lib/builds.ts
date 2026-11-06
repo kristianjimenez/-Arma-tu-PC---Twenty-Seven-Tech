@@ -8,7 +8,7 @@ export interface SavedBuildEntry { id: string; name: string; date: string; parts
 
 export const listBuilds = (): Promise<SavedBuildEntry[]> => api<SavedBuildEntry[]>('builds');
 export const saveBuildEntry = (name: string, parts: PartIds) => api('builds', { method: 'POST', body: { nombre: name, piezas: parts } });
-export const deleteBuildEntry = (id: string) => api(`builds/${encodeURIComponent(id)}`, { method: 'DELETE' });
+export const deleteBuildEntry = (id: string) => api(`builds?id=${encodeURIComponent(id)}`, { method: 'DELETE' });
 
 const draftKey = (email: string) => `t27.builds.draft.${email}`;
 export function loadDraft(email: string): PartIds {

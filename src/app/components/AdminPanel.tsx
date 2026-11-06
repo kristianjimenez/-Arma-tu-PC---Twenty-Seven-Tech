@@ -52,7 +52,7 @@ export function AdminPanel({ name, onLogout, onViewStore }: AdminPanelProps) {
   const [summary, setSummary] = useState<Summary>(EMPTY_SUMMARY);
   useEffect(() => {
     let alive = true;
-    Promise.all([fetchQuotes(), api<Summary>('admin/resumen')])
+    Promise.all([fetchQuotes(), api<Summary>('admin-resumen')])
       .then(([qs, sm]) => { if (alive) { setQuotes(qs); setSummary(sm); } })
       .catch((e) => toast.error(e instanceof Error ? e.message : 'No se pudieron cargar los datos'));
     return () => { alive = false; };

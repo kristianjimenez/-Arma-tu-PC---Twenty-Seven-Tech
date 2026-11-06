@@ -385,8 +385,11 @@ async function route(req: Req, res: Res, seg: string[]) {
 
 export default async function handler(req: Req, res: Res) {
   try {
-    const path = new URL(req.url ?? '/', 'http://localhost').pathname.replace(/^\/api\/?/, '');
-    const seg = path.split('/').filter(Boolean).map(decodeURIComponent);
+    const url = new URL(req.url ?? '/', 'http://localhost');
+    let seg = url.pathname.replace(/^\/api\/?/, '').split('/').filter(Boolean).map(decodeURIComponent);
+    // El cliente usa rutas de UN solo segmento (/api/builds?id=5, /api/admin-pedidos): son las más seguras en Vercel.
+    if (seg[0]?.startsWith('admin-')) seg = ['admin', seg[0].slice(6)];
+    else if (seg.length === 1 && url.searchParams.get('id')) seg = [seg[0], url.searchParams.get('id')!];
     await route(req, res, seg);
   } catch (e: any) {
     if (e instanceof HttpError) return res.status(e.code).json({ error: e.message });

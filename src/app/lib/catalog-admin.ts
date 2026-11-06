@@ -40,7 +40,7 @@ export async function loadCatalog(parts: PCComponent[], presets: Preset[]): Prom
 
 /** Cambia precio, existencias o disponibilidad de una pieza en la base de datos. */
 export async function updatePart(part: PCComponent, patch: { active?: boolean; price?: number; stock?: number }) {
-  await api(`componentes/${encodeURIComponent(part.id)}`, {
+  await api(`componentes?id=${encodeURIComponent(part.id)}`, {
     method: 'PATCH',
     body: { ...(patch.price !== undefined ? { precio: patch.price } : {}), ...(patch.stock !== undefined ? { existencias: patch.stock } : {}), ...(patch.active !== undefined ? { activo: patch.active } : {}) },
   });

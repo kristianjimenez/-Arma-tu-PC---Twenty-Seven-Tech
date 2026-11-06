@@ -8,7 +8,7 @@ export interface Quote {
   items: QuoteItem[]; subtotal: number; tax: number; total: number; status: QuoteStatus; stockApplied: boolean;
 }
 
-export const fetchQuotes = () => api<Quote[]>('admin/pedidos');
+export const fetchQuotes = () => api<Quote[]>('admin-pedidos');
 /** Al pasar a "vendida" el servidor descuenta 1 unidad de cada pieza (una sola vez). */
-export const setQuoteStatus = (id: number, estado: QuoteStatus) => api(`pedidos/${id}`, { method: 'PATCH', body: { estado } });
-export const deleteQuote = (id: number) => api(`pedidos/${id}`, { method: 'DELETE' });
+export const setQuoteStatus = (id: number, estado: QuoteStatus) => api(`pedidos?id=${id}`, { method: 'PATCH', body: { estado } });
+export const deleteQuote = (id: number) => api(`pedidos?id=${id}`, { method: 'DELETE' });
