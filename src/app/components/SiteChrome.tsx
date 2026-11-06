@@ -1,4 +1,4 @@
-import { MapPin, LogOut, FolderOpen, User } from 'lucide-react';
+import { MapPin, LogOut, FolderOpen, User, LayoutDashboard } from 'lucide-react';
 import logo from '../../imports/twenty_seven_tech_logo.png';
 import { STORE } from '../data/store-info';
 import { InstagramIcon, WhatsAppIcon } from './SocialLinks';
@@ -9,6 +9,8 @@ interface HeaderProps {
   onLogin: () => void;
   onLogout: () => void;
   onMyBuilds: () => void;
+  isAdmin?: boolean;
+  onAdmin?: () => void;
 }
 
 const links = [
@@ -18,7 +20,7 @@ const links = [
   { href: '#tienda', label: 'La tienda' },
 ];
 
-export function SiteHeader({ userName, savedCount, onLogin, onLogout, onMyBuilds }: HeaderProps) {
+export function SiteHeader({ userName, savedCount, onLogin, onLogout, onMyBuilds, isAdmin, onAdmin }: HeaderProps) {
   return (
     <header className="sticky top-0 z-40">
       <div className="bg-[var(--t27-red)] text-white">
@@ -42,6 +44,9 @@ export function SiteHeader({ userName, savedCount, onLogin, onLogout, onMyBuilds
             <a href={STORE.instagramUrl} target="_blank" rel="noopener noreferrer" aria-label="Instagram" className="hidden h-9 w-9 items-center justify-center text-gray-300 hover:text-white sm:flex"><InstagramIcon className="h-5 w-5" /></a>
             {userName ? (
               <>
+                {isAdmin && (
+                  <button onClick={onAdmin} className="flex items-center gap-1.5 bg-[var(--t27-red)] px-3 py-2 font-medium text-white hover:bg-red-500"><LayoutDashboard className="h-4 w-4" /> <span className="hidden sm:inline">Panel admin</span></button>
+                )}
                 <button onClick={onMyBuilds} className="flex items-center gap-1.5 border border-white/25 px-3 py-2 hover:bg-white hover:text-black">
                   <FolderOpen className="h-4 w-4" /> <span className="hidden sm:inline">Mis builds</span>{savedCount > 0 && <span className="bg-[var(--t27-red)] px-1.5 text-xs text-white">{savedCount}</span>}
                 </button>

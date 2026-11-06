@@ -16,6 +16,9 @@ import { LoginPage } from './components/LoginPage';
 import { SiteHeader } from './components/SiteChrome';
 import { Hero, ReadyBuilds, HowToBuy, StoreSection } from './components/Landing';
 import { Footer } from './components/Footer';
+import { AdminPanel } from './components/AdminPanel';
+import { track } from './lib/stats';
+import { isActive } from './lib/catalog-admin';
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from './components/ui/sheet';
 import { ChevronRight, ChevronLeft, ListChecks, Save, Trash2 } from 'lucide-react';
 import { toast, Toaster } from 'sonner';
@@ -52,7 +55,7 @@ const idsOf = (b: PCBuild): PartIds => {
 
 export default function App() {
   const [session, setSession] = useState<Session | null>(() => getSession());
-  const [view, setView] = useState<'site' | 'login'>('site');
+  const [view, setView] = useState<'site' | 'login' | 'admin'>(() => (getSession()?.role === 'admin' ? 'admin' : 'site'));
   const [selectedCategory, setSelectedCategory] = useState<ComponentCategory>('cpu');
   const [build, setBuild] = useState<PCBuild>(() => buildFromIds(loadDraft(getSession()?.email ?? 'anon')));
   const [savedBuilds, setSavedBuilds] = useState<SavedBuildEntry[]>(() => { const s = getSession(); return s ? listBuilds(s.email) : []; });
@@ -92,7 +95,15 @@ export default function App() {
     updateBuild(rest);
   };
 
+  // Si el administrador desactivó o agotó alguna pieza de un equipo, no se puede cargar.
+  const blockUnavailablePreset = (preset: Preset) => {
+    if (!Object.values(preset.parts).some((id) => !isActive(id))) return false;
+    toast.warning(`"${preset.name}" no está disponible`, { description: 'Alguna de sus piezas está agotada o desactivada por la tienda' });
+    return true;
+  };
+
   const handleLoadPreset = (preset: Preset) => {
+    if (blockUnavailablePreset(preset)) return;
     demoToken.current++; setDemoRunning(false);
     setBuild(buildFromIds(preset.parts));
     setSelectedCategory('case');
@@ -102,6 +113,7 @@ export default function App() {
 
   // Demo guiada: arma un PC paso a paso (útil para mostrar el flujo completo)
   const handleDemo = async () => {
+    if (blockUnavailablePreset(FEATURED)) return;
     const token = ++demoToken.current;
     setDemoRunning(true);
     setBuild(emptyBuild);
@@ -129,10 +141,12 @@ export default function App() {
     if (chosen === 0) return;
     const label = build.components.gpu ? analyzeBuildPerformance(build.components).tierLabel : 'Build en progreso';
     setSavedBuilds(saveBuildEntry(session.email, `${label} • $${build.totalPrice}`, idsOf(build)));
+    track('save');
     toast.success('Guardado en "Mis builds"');
   };
 
   const handleShare = async () => {
+    track('share');
     const lines = categories.map(({ id, label }) => build.components[id] && `• ${label}: ${build.components[id]!.name}`).filter(Boolean).join('\n');
     const text = `Mi PC en ${STORE.name}:\n${lines}\nTotal con IVA: $${totalWithTax.toFixed(2)}\n${STORE.instagramUrl}`;
     if (navigator.share) { try { await navigator.share({ title: `Mi PC en ${STORE.name}`, text }); return; } catch { /* cancelado */ } }
@@ -144,15 +158,19 @@ export default function App() {
     setSession(s);
     setSavedBuilds(listBuilds(s.email));
     if (Object.keys(build.components).length === 0) setBuild(buildFromIds(loadDraft(s.email)));
-    setView('site');
+    setView(s.role === 'admin' ? 'admin' : 'site');
     toast.success(`Hola, ${s.name.split(' ')[0]}`);
   };
 
   const handleLogout = () => {
     demoToken.current++; setDemoRunning(false);
-    clearSession(); setSession(null); setSavedBuilds([]); setBuild(emptyBuild); setSelectedCategory('cpu');
+    clearSession(); setSession(null); setView('site'); setSavedBuilds([]); setBuild(emptyBuild); setSelectedCategory('cpu');
     toast.info('Sesión cerrada');
   };
+
+  if (view === 'admin' && session?.role === 'admin') {
+    return <><Toaster theme="dark" position="top-center" /><AdminPanel name={session.name} onLogout={handleLogout} onViewStore={() => setView('site')} /></>;
+  }
 
   if (view === 'login') return <><Toaster theme="dark" position="top-center" /><LoginPage onLogin={handleLogin} onBack={() => setView('site')} /></>;
 
@@ -168,7 +186,7 @@ export default function App() {
   return (
     <div className="min-h-screen bg-black text-white">
       <Toaster theme="dark" position="top-center" toastOptions={{ style: { borderRadius: 0 } }} />
-      <SiteHeader userName={session?.name} savedCount={savedBuilds.length} onLogin={() => setView('login')} onLogout={handleLogout} onMyBuilds={() => setBuildsOpen(true)} />
+      <SiteHeader userName={session?.name} savedCount={savedBuilds.length} onLogin={() => setView('login')} onLogout={handleLogout} onMyBuilds={() => setBuildsOpen(true)} isAdmin={session?.role === 'admin'} onAdmin={() => setView('admin')} />
 
       <Hero onStart={goToBuilder} onLoadFeatured={() => handleLoadPreset(FEATURED)} />
       <ReadyBuilds onLoad={handleLoadPreset} onDemo={handleDemo} disabled={demoRunning} />
@@ -260,7 +278,7 @@ export default function App() {
         onLoad={(b) => { setBuild(buildFromIds(b.parts)); setBuildsOpen(false); goToBuilder(); toast.success('Build cargado'); }}
         onDelete={(id) => session && setSavedBuilds(deleteBuildEntry(session.email, id))} />
 
-      <CheckoutDialog open={checkoutOpen} onOpenChange={setCheckoutOpen} build={build} defaultName={session?.name}
+      <CheckoutDialog open={checkoutOpen} onOpenChange={setCheckoutOpen} build={build} defaultName={session?.name} defaultEmail={session?.email}
         onDownloadBudget={() => { setCheckoutOpen(false); setSaveDialogOpen(true); }} />
 
       <SaveBudgetDialog open={saveDialogOpen} onOpenChange={setSaveDialogOpen} build={build}

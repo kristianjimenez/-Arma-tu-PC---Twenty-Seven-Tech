@@ -4,6 +4,8 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } f
 import { PCBuild, ComponentCategory } from '../types/pc-component';
 import { PAY_METHODS, PayMethod, STORE, TAX_RATE, whatsappLink } from '../data/store-info';
 import { Order, newOrderCode, orderMessage, saveOrder } from '../lib/orders';
+import { addQuote } from '../lib/quotes';
+import { track } from '../lib/stats';
 
 const LABELS: Record<ComponentCategory, string> = {
   cpu: 'Procesador', motherboard: 'Placa base', ram: 'Memoria RAM', gpu: 'Tarjeta gráfica',
@@ -16,12 +18,13 @@ interface Props {
   onOpenChange: (o: boolean) => void;
   build: PCBuild;
   defaultName?: string;
+  defaultEmail?: string;
   onDownloadBudget: () => void;
 }
 
 const input = 'w-full border border-white/20 bg-black px-3 py-2.5 text-sm text-white placeholder:text-gray-500 outline-none focus:border-[var(--t27-red)]';
 
-export function CheckoutDialog({ open, onOpenChange, build, defaultName = '', onDownloadBudget }: Props) {
+export function CheckoutDialog({ open, onOpenChange, build, defaultName = '', defaultEmail = '', onDownloadBudget }: Props) {
   const [name, setName] = useState(defaultName);
   const [phone, setPhone] = useState('');
   const [method, setMethod] = useState<PayMethod>('whatsapp');
@@ -48,6 +51,12 @@ export function CheckoutDialog({ open, onOpenChange, build, defaultName = '', on
       subtotal, tax, total,
     };
     saveOrder(o);
+    track('quote');
+    addQuote({
+      customer: o.customer, email: defaultEmail, phone: o.phone, code: o.code, method: o.method,
+      items: ORDER.filter((c) => build.components[c]).map((c) => ({ id: build.components[c]!.id, label: LABELS[c], name: build.components[c]!.name, price: build.components[c]!.price })),
+      subtotal, total: Number(total.toFixed(2)),
+    });
     setOrder(o);
     window.open(whatsappLink(orderMessage(o, STORE.name)), '_blank', 'noopener');
   };

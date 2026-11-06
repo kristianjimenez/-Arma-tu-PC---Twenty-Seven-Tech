@@ -30,7 +30,7 @@ export function LoginPage({ onLogin, onBack }: LoginPageProps) {
     e.preventDefault();
     setError('');
     if (isRegister && name.trim().length < 2) return setError('Escribe tu nombre.');
-    if (!emailOk(email)) return setError('Ingresa un correo válido.');
+    if (!(!isRegister && email.trim().toLowerCase() === 'admin') && !emailOk(email)) return setError('Ingresa un correo válido.');
     if (isRegister && password.length < 8) return setError('La contraseña debe tener al menos 8 caracteres.');
     if (isRegister && password !== confirm) return setError('Las contraseñas no coinciden.');
     if (!password) return setError('Ingresa tu contraseña.');
@@ -83,9 +83,9 @@ export function LoginPage({ onLogin, onBack }: LoginPageProps) {
                 <div className="relative"><User className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
                   <input className={field} autoComplete="name" placeholder="Tu nombre" value={name} onChange={(e) => setName(e.target.value)} /></div></label>
             )}
-            <label className="block"><span className="mb-1.5 block text-sm">Correo electrónico</span>
+            <label className="block"><span className="mb-1.5 block text-sm">{isRegister ? 'Correo electrónico' : 'Correo o usuario'}</span>
               <div className="relative"><Mail className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
-                <input className={field} type="email" autoComplete="email" placeholder="tu@correo.com" value={email} onChange={(e) => setEmail(e.target.value)} /></div></label>
+                <input className={field} type={isRegister ? 'email' : 'text'} autoCapitalize="none" autoComplete="username" placeholder={isRegister ? 'tu@correo.com' : 'tu@correo.com o usuario'} value={email} onChange={(e) => setEmail(e.target.value)} /></div></label>
             <label className="block"><span className="mb-1.5 block text-sm">Contraseña</span>
               <div className="relative"><Lock className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
                 <input className={field} type={show ? 'text' : 'password'} autoComplete={isRegister ? 'new-password' : 'current-password'} placeholder={isRegister ? 'Mínimo 8 caracteres' : 'Tu contraseña'} value={password} onChange={(e) => setPassword(e.target.value)} />

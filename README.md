@@ -119,3 +119,11 @@ El repositorio incluye un flujo de GitHub Actions que publica el sitio en GitHub
 ## Créditos
 
 Logo y datos de contacto © Twenty Seven Tech. Ver [`ATTRIBUTIONS.md`](ATTRIBUTIONS.md) para las demás atribuciones.
+
+## Panel de administración (demo)
+Ingreso: en **Ingresar**, usuario `admin` · contraseña `admin`. Incluye:
+- **Pendientes:** los pedidos que los clientes envían por WhatsApp quedan registrados (código, nombre, teléfono, piezas, total) y se marcan como atendida / vendida / cancelada. Al marcar **vendida** se descuenta el stock.
+- **Inventario:** precio y existencias por pieza, activar/desactivar, estado En stock / Stock bajo / Agotado, y subir una foto por pieza (se puede exportar como zip para copiarla a `public/img/components/`).
+- **Resumen:** contadores de pedidos, builds guardados, compartidos y usuarios.
+
+Todo se guarda en el navegador (localStorage). El rol de administrador se valida en el cliente, así que es solo para la demo; en producción debe validarse en un servidor.

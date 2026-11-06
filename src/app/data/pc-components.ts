@@ -1,4 +1,5 @@
 import { PCComponent } from '../types/pc-component';
+import { applyOverrides, isActive } from '../lib/catalog-admin';
 
 /**
  * Catálogo alineado con lo que vende Twenty Seven Tech (Ryzen 5 5600X / 8600G /
@@ -63,6 +64,10 @@ export const pcComponents: PCComponent[] = [
   { id: 'case-4', brand: 'Corsair', name: '4000D Airflow', category: 'case', price: 110, specs: 'Media torre • Malla frontal • Hasta ATX', stock: 7, rating: 5, supportedForms: ['mATX', 'ATX'] },
 ];
 
+// Precio y existencias que el administrador haya ajustado en el panel.
+applyOverrides(pcComponents);
+
+/** Piezas que los clientes pueden elegir: solo las que el administrador dejó disponibles. */
 export function getCategoryComponents(category: string): PCComponent[] {
-  return pcComponents.filter((component) => component.category === category);
+  return pcComponents.filter((component) => component.category === category && isActive(component.id));
 }
