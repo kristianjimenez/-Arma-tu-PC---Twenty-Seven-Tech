@@ -168,6 +168,19 @@ export default function App() {
     } catch (e) { toast.error(e instanceof Error ? e.message : 'No se pudo guardar'); }
   };
 
+  const handleDeleteBuild = async (id: string) => {
+    const before = savedBuilds;
+    setSavedBuilds((l) => l.filter((b) => b.id !== id)); // se quita al instante
+    try {
+      await deleteBuildEntry(id);
+      toast.success('Build eliminado');
+    } catch (e) {
+      setSavedBuilds(before); // si el servidor falla, se devuelve
+      toast.error(e instanceof Error ? `No se pudo eliminar: ${e.message}` : 'No se pudo eliminar');
+    }
+    refreshBuilds();
+  };
+
   const handleShare = async () => {
     track('share');
     const lines = categories.map(({ id, label }) => build.components[id] && `• ${label}: ${build.components[id]!.name}`).filter(Boolean).join('\n');
@@ -199,7 +212,7 @@ export default function App() {
   const summary = (
     <BuildSummary
       components={build.components} totalPrice={build.totalPrice} compatibilityIssues={build.compatibilityIssues}
-      onRemove={handleRemove} completionPercentage={completion} onShare={handleShare}
+      onRemove={handleRemove} completionPercentage={completion} onShare={handleShare} onSaveBuild={handleSaveBuild} loggedIn={!!session}
       onSave={() => { setSummaryOpen(false); setSaveDialogOpen(true); }}
       onCheckout={() => { setSummaryOpen(false); setCheckoutOpen(true); }}
     />
@@ -263,7 +276,7 @@ export default function App() {
               </label>
               <span className="text-gray-500">{options.length} de {allOptions.length}</span>
               <div className="ml-auto flex gap-2">
-                <button onClick={handleSaveBuild} disabled={chosen === 0} className="flex items-center gap-1.5 border border-white/20 px-3 py-2 hover:bg-white hover:text-black disabled:opacity-40"><Save className="h-4 w-4" /> Guardar</button>
+                <button onClick={handleSaveBuild} disabled={chosen === 0} className="flex items-center gap-2 bg-[var(--t27-red)] px-4 py-2 font-semibold text-white shadow-lg shadow-red-600/30 transition hover:bg-red-500 disabled:bg-white/10 disabled:text-gray-500 disabled:shadow-none"><Save className="h-4 w-4" /> Guardar build</button>
                 <button onClick={handleClear} disabled={chosen === 0} className="flex items-center gap-1.5 border border-white/20 px-3 py-2 text-gray-400 hover:text-white disabled:opacity-40"><Trash2 className="h-4 w-4" /> Vaciar</button>
               </div>
             </div>
@@ -312,7 +325,7 @@ export default function App() {
 
       <MyBuildsSheet open={buildsOpen} onOpenChange={setBuildsOpen} builds={savedBuilds}
         onLoad={(b) => { setBuild(buildFromIds(b.parts)); setBuildsOpen(false); goToBuilder(); toast.success('Build cargado'); }}
-        onDelete={(id) => deleteBuildEntry(id).then(refreshBuilds).catch(() => toast.error('No se pudo eliminar'))} />
+        onDelete={handleDeleteBuild} />
 
       <CheckoutDialog open={checkoutOpen} onOpenChange={setCheckoutOpen} build={build} defaultName={session?.name} defaultEmail={session?.email}
         onDownloadBudget={() => { setCheckoutOpen(false); setSaveDialogOpen(true); }} />

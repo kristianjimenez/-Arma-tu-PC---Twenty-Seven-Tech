@@ -1,5 +1,5 @@
 import { ComponentCategory, PCComponent } from '../types/pc-component';
-import { CheckCircle2, AlertTriangle, X, FileDown, Share2, MessageCircle } from 'lucide-react';
+import { CheckCircle2, AlertTriangle, X, FileDown, Share2, MessageCircle, Save } from 'lucide-react';
 import { TAX_RATE } from '../data/store-info';
 import { analyzeBuildPerformance } from '../utils/build-performance';
 import { requiredCategories } from '../utils/compatibility';
@@ -12,6 +12,8 @@ interface BuildSummaryProps {
   onRemove: (category: ComponentCategory) => void;
   onSave: () => void;     // descargar presupuesto (PNG/PDF)
   onShare: () => void;
+  onSaveBuild?: () => void; // guardar en "Mis builds" (base de datos)
+  loggedIn?: boolean;
   onCheckout: () => void; // finalizar pedido
   completionPercentage: number;
 }
@@ -21,7 +23,7 @@ const ORDER: { id: ComponentCategory; label: string }[] = [
   { id: 'gpu', label: 'Tarjeta gráfica' }, { id: 'storage', label: 'Almacenamiento' }, { id: 'power', label: 'Fuente' }, { id: 'case', label: 'Case' },
 ];
 
-export function BuildSummary({ components, totalPrice, compatibilityIssues, onRemove, onSave, onShare, onCheckout, completionPercentage }: BuildSummaryProps) {
+export function BuildSummary({ components, totalPrice, compatibilityIssues, onRemove, onSave, onShare, onSaveBuild, loggedIn, onCheckout, completionPercentage }: BuildSummaryProps) {
   const required = requiredCategories(components);
   const chosen = required.filter((c) => components[c]).length;
   const igpu = !components.gpu ? components.cpu?.igpu : undefined;
@@ -94,6 +96,11 @@ export function BuildSummary({ components, totalPrice, compatibilityIssues, onRe
           <MessageCircle className="h-4 w-4" /> Finalizar pedido
         </button>
         {!canOrder && <p className="text-center text-xs text-gray-500">{!isComplete ? `Faltan ${required.length - chosen} piezas para finalizar.` : 'Corrige la compatibilidad para finalizar.'}</p>}
+        {onSaveBuild && (
+          <button onClick={onSaveBuild} disabled={Object.keys(components).length === 0} className="flex w-full items-center justify-center gap-2 border-2 border-white bg-white py-3 text-sm font-bold text-black transition hover:bg-transparent hover:text-white disabled:border-white/20 disabled:bg-transparent disabled:text-gray-600">
+            <Save className="h-4 w-4" /> {loggedIn ? 'Guardar en Mis builds' : 'Inicia sesión para guardar'}
+          </button>
+        )}
         <div className="grid grid-cols-2 gap-2 pt-1">
           <button onClick={onSave} disabled={!isComplete} className="flex items-center justify-center gap-1.5 border border-white/25 py-2 text-xs hover:bg-white hover:text-black disabled:opacity-40"><FileDown className="h-3.5 w-3.5" /> Presupuesto</button>
           <button onClick={onShare} disabled={!isComplete} className="flex items-center justify-center gap-1.5 border border-white/25 py-2 text-xs hover:bg-white hover:text-black disabled:opacity-40"><Share2 className="h-3.5 w-3.5" /> Compartir</button>

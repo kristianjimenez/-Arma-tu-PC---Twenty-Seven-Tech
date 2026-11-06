@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { FolderOpen, Trash2 } from 'lucide-react';
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from './ui/sheet';
 import { SavedBuildEntry } from '../lib/builds';
@@ -12,6 +13,7 @@ interface Props {
 }
 
 export function MyBuildsSheet({ open, onOpenChange, builds, onLoad, onDelete }: Props) {
+  const [confirmId, setConfirmId] = useState<string | null>(null);
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent side="right" className="w-full border-white/20 bg-black sm:max-w-md">
@@ -21,7 +23,7 @@ export function MyBuildsSheet({ open, onOpenChange, builds, onLoad, onDelete }: 
         <div className="space-y-3 overflow-y-auto px-4 pb-6">
           {builds.length === 0 && (
             <p className=" border border-dashed border-white/10 p-6 text-center text-sm text-gray-500">
-              Aún no has guardado ninguno. Arma tu PC y pulsa “Guardar build”.
+              Aún no has guardado ninguno. Arma tu PC y pulsa «Guardar build».
             </p>
           )}
           {builds.map((b) => {
@@ -39,9 +41,16 @@ export function MyBuildsSheet({ open, onOpenChange, builds, onLoad, onDelete }: 
                   <button onClick={() => onLoad(b)} className="inline-flex flex-1 items-center justify-center gap-2  bg-[var(--t27-red)] py-2 text-sm text-white hover:bg-red-500">
                     <FolderOpen className="h-4 w-4" /> Abrir
                   </button>
-                  <button onClick={() => onDelete(b.id)} aria-label="Eliminar build" className=" border border-white/10 px-3 text-gray-400 hover:border-red-500/60 hover:text-red-400">
-                    <Trash2 className="h-4 w-4" />
-                  </button>
+                  {confirmId === b.id ? (
+                    <>
+                      <button onClick={() => { setConfirmId(null); onDelete(b.id); }} className="border border-red-500 bg-red-600 px-3 text-sm font-semibold text-white hover:bg-red-500">Sí, eliminar</button>
+                      <button onClick={() => setConfirmId(null)} className="border border-white/20 px-3 text-sm text-gray-300 hover:text-white">No</button>
+                    </>
+                  ) : (
+                    <button onClick={() => setConfirmId(b.id)} aria-label="Eliminar build" className="border border-white/10 px-3 text-gray-400 hover:border-red-500/60 hover:text-red-400">
+                      <Trash2 className="h-4 w-4" />
+                    </button>
+                  )}
                 </div>
               </div>
             );
