@@ -1,57 +1,51 @@
-// Ajustes del catálogo hechos desde el panel administrativo (demo, en el navegador).
-// Se guardan SOLO las diferencias (disponible / precio / existencias) sobre el catálogo base.
-// En producción esto vive en la base de datos (tabla COMPONENTE) y se edita vía API.
+// Catálogo: viene de PostgreSQL (tablas componente, equipo_preconfigurado y equipo_pieza).
+// Los datos estáticos de data/pc-components.ts solo sirven de respaldo si la API no responde.
 import type { PCComponent } from '../types/pc-component';
+import type { Preset } from '../data/presets';
+import { api } from './api';
+import { setImageVersions } from './images';
 
-const KEY = 't27.catalog.overrides';
-
-export interface CatalogOverride { active?: boolean; price?: number; stock?: number }
-export type OverrideMap = Record<string, CatalogOverride>;
-
-let cache: OverrideMap | null = null;
-const base = new Map<string, { price: number; stock: number }>();
-
-export function readOverrides(): OverrideMap {
-  if (cache) return cache;
-  try { cache = JSON.parse(localStorage.getItem(KEY) || '{}'); } catch { cache = {}; }
-  return cache!;
-}
-
-function writeOverrides(map: OverrideMap) {
-  cache = map;
-  try { localStorage.setItem(KEY, JSON.stringify(map)); } catch { /* sin espacio */ }
-}
+const inactive = new Set<string>();
 
 /** ¿La pieza está disponible para los clientes? (por defecto sí) */
-export function isActive(id: string): boolean {
-  return readOverrides()[id]?.active !== false;
+export function isActive(id: string): boolean { return !inactive.has(id); }
+
+interface CatalogResponse {
+  componentes: (PCComponent & { active: boolean })[];
+  equipos: Preset[];
+  imagenes: Record<string, number>;
 }
 
-/** Cambia un ajuste de una pieza; si queda igual que el catálogo base, se borra el ajuste. */
-export function setOverride(id: string, patch: CatalogOverride) {
-  const map = { ...readOverrides() };
-  const next = { ...map[id], ...patch };
-  const b = base.get(id);
-  if (next.active !== false) delete next.active;
-  if (b && next.price === b.price) delete next.price;
-  if (b && next.stock === b.stock) delete next.stock;
-  if (Object.keys(next).length === 0) delete map[id];
-  else map[id] = next;
-  writeOverrides(map);
-}
-
-export function resetOverrides() { writeOverrides({}); }
-
-/** Aplica precio y existencias guardados a los objetos del catálogo (se puede llamar varias veces). */
-export function applyOverrides(parts: PCComponent[]) {
-  const map = readOverrides();
-  for (const p of parts) {
-    if (!base.has(p.id)) base.set(p.id, { price: p.price, stock: p.stock });
-    const b = base.get(p.id)!;
-    p.price = map[p.id]?.price ?? b.price;
-    p.stock = map[p.id]?.stock ?? b.stock;
+/** Descarga el catálogo de la base de datos y actualiza en sitio los arreglos que usa toda la interfaz. */
+export async function loadCatalog(parts: PCComponent[], presets: Preset[]): Promise<boolean> {
+  try {
+    const r = await api<CatalogResponse>('catalogo');
+    const byId = new Map(parts.map((p) => [p.id, p]));
+    inactive.clear();
+    for (const row of r.componentes) {
+      const { active, ...data } = row;
+      if (!active) inactive.add(row.id);
+      const cur = byId.get(row.id);
+      if (cur) Object.assign(cur, { tag: undefined, igpu: undefined }, data);
+      else parts.push(data as PCComponent);
+    }
+    if (r.equipos.length) presets.splice(0, presets.length, ...r.equipos);
+    setImageVersions(r.imagenes);
+    window.dispatchEvent(new Event('t27-catalog'));
+    return true;
+  } catch {
+    return false; // sin API: se queda el catálogo de respaldo
   }
 }
 
-export function basePrice(id: string): number | undefined { return base.get(id)?.price; }
-export function baseStock(id: string): number | undefined { return base.get(id)?.stock; }
+/** Cambia precio, existencias o disponibilidad de una pieza en la base de datos. */
+export async function updatePart(part: PCComponent, patch: { active?: boolean; price?: number; stock?: number }) {
+  await api(`componentes/${encodeURIComponent(part.id)}`, {
+    method: 'PATCH',
+    body: { ...(patch.price !== undefined ? { precio: patch.price } : {}), ...(patch.stock !== undefined ? { existencias: patch.stock } : {}), ...(patch.active !== undefined ? { activo: patch.active } : {}) },
+  });
+  if (patch.price !== undefined) part.price = patch.price;
+  if (patch.stock !== undefined) part.stock = patch.stock;
+  if (patch.active !== undefined) { if (patch.active) inactive.delete(part.id); else inactive.add(part.id); }
+  window.dispatchEvent(new Event('t27-catalog'));
+}

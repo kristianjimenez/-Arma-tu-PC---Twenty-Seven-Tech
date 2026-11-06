@@ -1,24 +1,18 @@
-// Pedidos de demo (localStorage). En producción: API + base de datos de la tienda.
-export interface OrderItem { label: string; name: string; price: number }
+// Pedidos: el servidor (PostgreSQL) valida las piezas, calcula los precios y genera el código.
+import { api } from './api';
+
+export interface OrderItem { id?: string; label: string; name: string; price: number }
 export interface Order {
   code: string; date: string; customer: string; phone: string;
   method: 'whatsapp' | 'local'; note: string; items: OrderItem[];
   subtotal: number; tax: number; total: number;
 }
 
-export function newOrderCode(): string {
-  const d = new Date();
-  const ymd = `${String(d.getFullYear()).slice(2)}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}`;
-  const rnd = Math.random().toString(36).slice(2, 6).toUpperCase();
-  return `T27-${ymd}-${rnd}`;
-}
+export interface OrderInput { cliente: string; telefono: string; metodo: 'whatsapp' | 'local'; nota: string; correo?: string; piezas: string[] }
+export interface OrderResult { codigo: string; subtotal: number; iva: number; total: number; tasa: number | null }
 
-export function saveOrder(order: Order) {
-  try {
-    const all = JSON.parse(localStorage.getItem('t27.orders') || '[]');
-    localStorage.setItem('t27.orders', JSON.stringify([order, ...all].slice(0, 50)));
-  } catch { /* sin espacio */ }
-}
+/** Registra el pedido en la base de datos. Lanza un error con el motivo si algo no es válido (agotado, incompatible...). */
+export const submitOrder = (input: OrderInput) => api<OrderResult>('pedidos', { method: 'POST', body: input });
 
 export function orderMessage(o: Order, storeName: string): string {
   const lines = o.items.map((i) => `• ${i.label}: ${i.name} — $${i.price}`).join('\n');

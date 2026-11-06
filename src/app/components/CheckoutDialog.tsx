@@ -3,9 +3,7 @@ import { Check, MapPin, MessageCircle, Store, FileDown } from 'lucide-react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from './ui/dialog';
 import { PCBuild, ComponentCategory } from '../types/pc-component';
 import { PAY_METHODS, PayMethod, STORE, TAX_RATE, whatsappLink } from '../data/store-info';
-import { Order, newOrderCode, orderMessage, saveOrder } from '../lib/orders';
-import { addQuote } from '../lib/quotes';
-import { track } from '../lib/stats';
+import { Order, orderMessage, submitOrder } from '../lib/orders';
 
 const LABELS: Record<ComponentCategory, string> = {
   cpu: 'Procesador', motherboard: 'Placa base', ram: 'Memoria RAM', gpu: 'Tarjeta gráfica',
@@ -31,6 +29,7 @@ export function CheckoutDialog({ open, onOpenChange, build, defaultName = '', de
   const [note, setNote] = useState('');
   const [error, setError] = useState('');
   const [order, setOrder] = useState<Order | null>(null);
+  const [sending, setSending] = useState(false);
 
   const subtotal = build.totalPrice;
   const tax = subtotal * TAX_RATE;
@@ -41,24 +40,34 @@ export function CheckoutDialog({ open, onOpenChange, build, defaultName = '', de
     if (!o) setTimeout(() => { setOrder(null); setError(''); }, 250);
   };
 
-  const confirm = () => {
+  const confirm = async () => {
+    if (sending) return;
     if (name.trim().length < 2) return setError('Escribe tu nombre.');
     if (phone.replace(/\D/g, '').length < 10) return setError('Escribe un teléfono válido, con código de área.');
-    const o: Order = {
-      code: newOrderCode(), date: new Date().toLocaleString('es-VE'),
-      customer: name.trim(), phone: phone.trim(), method, note: note.trim(),
-      items: ORDER.filter((c) => build.components[c]).map((c) => ({ label: LABELS[c], name: build.components[c]!.name, price: build.components[c]!.price })),
-      subtotal, tax, total,
-    };
-    saveOrder(o);
-    track('quote');
-    addQuote({
-      customer: o.customer, email: defaultEmail, phone: o.phone, code: o.code, method: o.method,
-      items: ORDER.filter((c) => build.components[c]).map((c) => ({ id: build.components[c]!.id, label: LABELS[c], name: build.components[c]!.name, price: build.components[c]!.price })),
-      subtotal, total: Number(total.toFixed(2)),
-    });
-    setOrder(o);
-    window.open(whatsappLink(orderMessage(o, STORE.name)), '_blank', 'noopener');
+    setError(''); setSending(true);
+    // Se abre la ventana ya (dentro del clic) para que el navegador no la bloquee; luego se le pone el enlace de WhatsApp.
+    const win = window.open('', '_blank');
+    if (win) win.opener = null;
+    try {
+      const items = ORDER.filter((c) => build.components[c]).map((c) => ({ id: build.components[c]!.id, label: LABELS[c], name: build.components[c]!.name, price: build.components[c]!.price }));
+      // El pedido se guarda en PostgreSQL; el servidor revisa existencias y compatibilidad y calcula el total.
+      const r = await submitOrder({
+        cliente: name.trim(), telefono: phone.trim(), metodo: method, nota: note.trim(), correo: defaultEmail || undefined,
+        piezas: items.map((i) => i.id),
+      });
+      const o: Order = {
+        code: r.codigo, date: new Date().toLocaleString('es-VE'), customer: name.trim(), phone: phone.trim(), method, note: note.trim(),
+        items, subtotal: r.subtotal, tax: r.iva, total: r.total,
+      };
+      setOrder(o);
+      const url = whatsappLink(orderMessage(o, STORE.name));
+      if (win) win.location.href = url; else window.open(url, '_blank', 'noopener');
+    } catch (e) {
+      win?.close();
+      setError(e instanceof Error ? e.message : 'No se pudo registrar el pedido. Intenta de nuevo.');
+    } finally {
+      setSending(false);
+    }
   };
 
   return (
@@ -114,8 +123,8 @@ export function CheckoutDialog({ open, onOpenChange, build, defaultName = '', de
 
               {error && <p role="alert" className="border border-[var(--t27-red)] bg-[var(--t27-red)]/10 px-3 py-2 text-sm text-red-300">{error}</p>}
 
-              <button onClick={confirm} className="cut flex w-full items-center justify-center gap-2 bg-[var(--t27-red)] py-3.5 text-base font-semibold text-white transition hover:bg-red-500">
-                <MessageCircle className="h-5 w-5" /> Enviar pedido por WhatsApp
+              <button onClick={confirm} disabled={sending} className="cut flex w-full items-center justify-center gap-2 bg-[var(--t27-red)] py-3.5 text-base font-semibold text-white transition hover:bg-red-500 disabled:opacity-60">
+                <MessageCircle className="h-5 w-5" /> {sending ? 'Guardando pedido…' : 'Enviar pedido por WhatsApp'}
               </button>
             </div>
           </div>

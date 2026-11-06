@@ -46,6 +46,7 @@ const TIER_BADGE_COLORS: Record<
   string,
   { bg: string; border: string; text: string }
 > = {
+  integrated: { bg: "rgba(148,163,184,0.2)", border: "rgba(148,163,184,0.5)", text: "#cbd5e1" },
   ultra: {
     bg: "rgba(220,38,38,0.25)",
     border: "rgba(220,38,38,0.6)",

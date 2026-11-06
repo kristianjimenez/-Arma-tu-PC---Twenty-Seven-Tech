@@ -11,6 +11,8 @@ Quien va a comprar una PC por partes suele no saber si el procesador encaja con 
 ## Funciones
 
 - **Configurador por pasos** (procesador → placa → memoria → gráfica → disco → fuente → case). Las piezas que no encajan con lo ya elegido se muestran bloqueadas, con el motivo.
+- **Gráfica opcional:** si el procesador trae gráficos integrados (Ryzen 5 8600G, Ryzen 7 9800X3D, Core i5-14400), el paso de tarjeta gráfica pasa a ser opcional y el equipo se puede finalizar sin ella. Los procesadores con sufijo F (sin video) siguen exigiéndola.
+- **Tasa BCV:** se muestra la tasa oficial en el encabezado (consultada a DolarAPI y guardada por si no hay internet) y el total del equipo se convierte a bolívares.
 - **Equipos listos** de la tienda (Económico, 1080p, 1440p y 4K), todos verificados como compatibles, que el cliente carga y personaliza.
 - **Finalizar pedido:** el cliente deja nombre y teléfono, elige **pagar por WhatsApp** o **pagar en el local**, y se abre WhatsApp con el pedido redactado y un código único (`T27-AAMMDD-XXXX`).
 - **Rendimiento estimado:** nivel del equipo y qué juegos corre.
@@ -105,7 +107,7 @@ El repositorio incluye un flujo de GitHub Actions que publica el sitio en GitHub
 
 ## Limitaciones conocidas
 
-- **No hay servidor.** El pedido llega a la tienda cuando el cliente envía el mensaje de WhatsApp. Las cuentas, los builds y los pedidos se guardan en el navegador (`localStorage`); la contraseña se guarda con hash SHA-256 solo para la demo.
+- **Pago y envío fuera del sitio.** El pedido queda registrado en la base de datos, pero el pago y la entrega se coordinan por WhatsApp o en el local. No hay pasarela de pago ni notificaciones por correo.
 - **Los precios y el stock son referenciales** y deben confirmarse con la tienda.
 - El catálogo es pequeño (36 piezas, 3 plataformas) y está pensado para la demostración.
 
@@ -120,10 +122,38 @@ El repositorio incluye un flujo de GitHub Actions que publica el sitio en GitHub
 
 Logo y datos de contacto © Twenty Seven Tech. Ver [`ATTRIBUTIONS.md`](ATTRIBUTIONS.md) para las demás atribuciones.
 
-## Panel de administración (demo)
-Ingreso: en **Ingresar**, usuario `admin` · contraseña `admin`. Incluye:
-- **Pendientes:** los pedidos que los clientes envían por WhatsApp quedan registrados (código, nombre, teléfono, piezas, total) y se marcan como atendida / vendida / cancelada. Al marcar **vendida** se descuenta el stock.
-- **Inventario:** precio y existencias por pieza, activar/desactivar, estado En stock / Stock bajo / Agotado, y subir una foto por pieza (se puede exportar como zip para copiarla a `public/img/components/`).
-- **Resumen:** contadores de pedidos, builds guardados, compartidos y usuarios.
+## Base de datos PostgreSQL (Neon) y API
 
-Todo se guarda en el navegador (localStorage). El rol de administrador se valida en el cliente, así que es solo para la demo; en producción debe validarse en un servidor.
+**Todo se guarda en PostgreSQL**: usuarios, sesiones, catálogo (precios, existencias, disponibilidad), imágenes de productos, equipos preconfigurados, pedidos, builds guardados, eventos y la tasa BCV. El navegador solo conserva el *borrador* del equipo que estás armando.
+
+```
+Navegador (React)  →  /api/*  (funciones serverless de Vercel, api/[...route].ts)  →  PostgreSQL (Neon)
+```
+
+| Tabla | Contenido |
+|---|---|
+| `usuario`, `sesion` | cuentas (clave con **scrypt** + sal) y sesiones (solo se guarda el **hash** del token) |
+| `componente`, `imagen` | catálogo con atributos de compatibilidad; fotos como `bytea` |
+| `equipo_preconfigurado`, `equipo_pieza` | los 4 equipos listos |
+| `pedido`, `pedido_item` | pedidos con precios congelados, estado y control de stock |
+| `build_guardado`, `evento`, `tasa_cambio` | "Mis builds", actividad y tasa BCV |
+
+Lo que valida el **servidor** (no se puede saltar desde el navegador): precios y total (se calculan con la base de datos), existencias, piezas desactivadas, compatibilidad (socket, RAM, fuente, formato) y el rol de administrador. Al marcar un pedido como **vendida**, las existencias se descuentan **una sola vez**, en una única sentencia SQL atómica.
+
+### Puesta en marcha (una sola vez)
+1. Crea un proyecto en [neon.tech](https://neon.tech) y ejecuta `db/schema.sql` y luego `db/seed.sql` (SQL Editor).
+2. Crea el usuario administrador (usuario `admin`, rol `admin`) con una clave guardada con scrypt: `node -e "const c=require('crypto');const s=c.randomBytes(16).toString('hex');console.log('scrypt$'+s+'$'+c.scryptSync(process.argv[1],s,64).toString('hex'))" TU_CLAVE` y pega el resultado en `usuario.clave_hash`.
+3. En Vercel → *Settings → Environment Variables* crea **`DATABASE_URL`** con la cadena de conexión de Neon (*Connection string*) y vuelve a desplegar (*Redeploy*).
+4. `npm install` (instala `@neondatabase/serverless`) y súbelo a GitHub: Vercel despliega solo.
+
+> La cadena de conexión es una **contraseña**: va en las variables de entorno de Vercel, nunca en el código ni en GitHub (`.env` está en `.gitignore`).
+> Para la defensa el administrador es `admin` / `admin`; **en producción cámbiala** (paso 2).
+
+Para probar en tu computadora con la API incluida: `npx vercel dev` (con un `.env` basado en `.env.example`). `npm run dev` solo levanta la interfaz (sin API se ve el catálogo de respaldo).
+
+## Panel de administración
+
+Entra con el usuario `admin`. El servidor comprueba el rol en **cada** petición del panel.
+- **Dashboard:** piezas disponibles/desactivadas/agotadas, valor del inventario, clientes, builds guardados, pedidos y las piezas más guardadas (consultas SQL).
+- **Pendientes:** todos los pedidos de todos los clientes y dispositivos; estados *pendiente → atendida → vendida / cancelada*. «Vendida» descuenta existencias.
+- **Inventario:** editar precio, existencias, disponibilidad y subir la foto de cada pieza (se guarda en PostgreSQL). Los cambios los ve cualquier cliente al instante.

@@ -1,6 +1,6 @@
 import { ComponentCategory, PCComponent } from '../types/pc-component';
 
-export type PerformanceTier = 'ultra' | 'high' | 'mid-high' | 'mid';
+export type PerformanceTier = 'ultra' | 'high' | 'mid-high' | 'mid' | 'integrated';
 
 export interface GameCapability {
   name: string;
@@ -23,6 +23,7 @@ function getGpuTier(gpu: PCComponent): PerformanceTier {
 }
 
 const TIER_LABELS: Record<PerformanceTier, string> = {
+  integrated: 'GRÁFICOS INTEGRADOS',
   ultra: 'ULTRA GAMING 4K',
   high: 'HIGH PERFORMANCE',
   'mid-high': 'MID-HIGH GAMING',
@@ -30,6 +31,13 @@ const TIER_LABELS: Record<PerformanceTier, string> = {
 };
 
 const GAMES: Record<PerformanceTier, GameCapability[]> = {
+  integrated: [
+    { name: 'Valorant', settings: '1080p Bajo' },
+    { name: 'CS2', settings: '1080p Bajo' },
+    { name: 'Fortnite', settings: '720p Bajo' },
+    { name: 'Minecraft', settings: '1080p Medio' },
+    { name: 'League of Legends', settings: '1080p Medio' },
+  ],
   ultra: [
     { name: 'Cyberpunk 2077', settings: '4K Ultra + Ray Tracing' },
     { name: 'Alan Wake 2', settings: '4K Ultra Ray Tracing' },
@@ -61,6 +69,13 @@ const GAMES: Record<PerformanceTier, GameCapability[]> = {
 };
 
 const TASKS: Record<PerformanceTier, string[]> = {
+  integrated: [
+    'Oficina y clases en línea',
+    'Navegación y video en 4K',
+    'Programación y desarrollo web',
+    'Edición de fotos básica',
+    'Juegos ligeros y esports',
+  ],
   ultra: [
     'Edición de video 8K en tiempo real',
     'Render 3D y VFX profesional',
@@ -95,7 +110,7 @@ export function analyzeBuildPerformance(
   components: Partial<Record<ComponentCategory, PCComponent>>
 ): BuildPerformance {
   const gpu = components.gpu;
-  const tier: PerformanceTier = gpu ? getGpuTier(gpu) : 'mid';
+  const tier: PerformanceTier = gpu ? getGpuTier(gpu) : components.cpu?.igpu ? 'integrated' : 'mid';
 
   return {
     tier,

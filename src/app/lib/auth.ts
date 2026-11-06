@@ -1,61 +1,53 @@
-// Autenticación DEMO del lado del cliente (localStorage).
-// Sirve para mostrar el flujo completo de login/registro en la defensa.
-// En producción esto se reemplaza por un backend (Node/Express + BD) con
-// hash de contraseña en servidor y tokens (JWT/sesión).
+// Cuentas de usuario: el registro, el inicio de sesión y el rol se validan en el SERVIDOR (PostgreSQL).
+// El navegador solo guarda el token de sesión y una copia del nombre para pintar la pantalla al instante.
+import { api, clearToken, getToken, setToken } from './api';
 
-const USERS_KEY = 't27.users';
 const SESSION_KEY = 't27.session';
 
 export interface Session { name: string; email: string; role?: 'admin' }
-interface StoredUser { name: string; email: string; passwordHash: string }
 
-// Cuenta de administración de la tienda (DEMO). La clave se guarda como hash SHA-256.
-// En producción el rol se valida en el servidor, nunca en el navegador.
+// El administrador entra con el usuario "admin" (existe en la tabla usuario con rol 'admin').
 export const ADMIN_EMAIL = 'admin';
-const ADMIN_HASH = '8c6976e5b5410415bde908bd4dee15dfb167a9c873fc4bb8a81f6f2ab448a918';
 
-async function hash(text: string): Promise<string> {
-  const data = new TextEncoder().encode(text);
-  const buf = await crypto.subtle.digest('SHA-256', data);
-  return Array.from(new Uint8Array(buf)).map((b) => b.toString(16).padStart(2, '0')).join('');
-}
+const cache = (s: Session | null) => {
+  try { if (s) localStorage.setItem(SESSION_KEY, JSON.stringify(s)); else localStorage.removeItem(SESSION_KEY); } catch { /* sin almacenamiento */ }
+};
 
-function readUsers(): StoredUser[] {
-  try { return JSON.parse(localStorage.getItem(USERS_KEY) || '[]'); } catch { return []; }
-}
-
+/** Copia local de la sesión (solo para dibujar la interfaz); la verdad la tiene el servidor. */
 export function getSession(): Session | null {
+  if (!getToken()) return null;
   try { return JSON.parse(localStorage.getItem(SESSION_KEY) || 'null'); } catch { return null; }
 }
 
-export function clearSession() { localStorage.removeItem(SESSION_KEY); }
+/** Pregunta al servidor si la sesión sigue vigente (y qué rol tiene realmente). */
+export async function verifySession(): Promise<Session | null> {
+  if (!getToken()) { cache(null); return null; }
+  try {
+    const { session } = await api<{ session: Session | null }>('yo');
+    if (!session) clearToken();
+    cache(session);
+    return session;
+  } catch {
+    return getSession(); // sin conexión: se conserva la copia local
+  }
+}
+
+export function clearSession() {
+  api('salir', { method: 'POST' }).catch(() => { /* ya no importa */ });
+  clearToken();
+  cache(null);
+}
 
 export async function registerUser(name: string, email: string, password: string): Promise<Session> {
-  const users = readUsers();
-  const mail = email.trim().toLowerCase();
-  if (mail === ADMIN_EMAIL || users.some((u) => u.email === mail)) throw new Error('Ya existe una cuenta con ese correo.');
-  const user: StoredUser = { name: name.trim(), email: mail, passwordHash: await hash(password) };
-  localStorage.setItem(USERS_KEY, JSON.stringify([...users, user]));
-  const session = { name: user.name, email: user.email };
-  localStorage.setItem(SESSION_KEY, JSON.stringify(session));
-  return session;
+  const r = await api<{ token: string; session: Session }>('registro', { method: 'POST', body: { nombre: name, correo: email, clave: password } });
+  setToken(r.token); cache(r.session);
+  return r.session;
 }
 
 export async function loginUser(email: string, password: string): Promise<Session> {
-  const mail = email.trim().toLowerCase();
-  if (mail === ADMIN_EMAIL) {
-    if ((await hash(password)) !== ADMIN_HASH) throw new Error('Correo o contraseña incorrectos.');
-    const admin: Session = { name: 'Administración', email: ADMIN_EMAIL, role: 'admin' };
-    localStorage.setItem(SESSION_KEY, JSON.stringify(admin));
-    return admin;
-  }
-  const user = readUsers().find((u) => u.email === mail);
-  if (!user || user.passwordHash !== (await hash(password))) {
-    throw new Error('Correo o contraseña incorrectos.');
-  }
-  const session = { name: user.name, email: user.email };
-  localStorage.setItem(SESSION_KEY, JSON.stringify(session));
-  return session;
+  const r = await api<{ token: string; session: Session }>('ingreso', { method: 'POST', body: { correo: email, clave: password } });
+  setToken(r.token); cache(r.session);
+  return r.session;
 }
 
 export function passwordStrength(pw: string): { score: number; label: string } {
@@ -66,5 +58,3 @@ export function passwordStrength(pw: string): { score: number; label: string } {
   if (/[^A-Za-z0-9]/.test(pw)) score++;
   return { score, label: ['Muy débil', 'Débil', 'Aceptable', 'Buena', 'Fuerte'][score] };
 }
-
-export function countUsers(): number { return readUsers().length; }

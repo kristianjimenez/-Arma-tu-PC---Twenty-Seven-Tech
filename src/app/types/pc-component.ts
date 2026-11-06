@@ -19,6 +19,7 @@ export interface PCComponent {
   formFactor?: string;        // placa: ATX | mATX
   supportedForms?: string[];  // case: formatos de placa que acepta
   minWattage?: number;        // GPU: fuente mínima recomendada
+  igpu?: string;              // CPU: nombre de sus gráficos integrados (si tiene). Con esto la tarjeta gráfica es opcional
 }
 
 export interface PCBuild {

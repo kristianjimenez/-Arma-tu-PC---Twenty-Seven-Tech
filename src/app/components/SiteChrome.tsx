@@ -2,6 +2,7 @@ import { MapPin, LogOut, FolderOpen, User, LayoutDashboard } from 'lucide-react'
 import logo from '../../imports/twenty_seven_tech_logo.png';
 import { STORE } from '../data/store-info';
 import { InstagramIcon, WhatsAppIcon } from './SocialLinks';
+import { fmtBs, fmtDate, useBcv } from '../lib/bcv';
 
 interface HeaderProps {
   userName?: string;
@@ -19,6 +20,17 @@ const links = [
   { href: '#como-comprar', label: 'Cómo comprar' },
   { href: '#tienda', label: 'La tienda' },
 ];
+
+function BcvBadge() {
+  const bcv = useBcv();
+  if (!bcv) return null;
+  return (
+    <div title={`Tasa oficial BCV · actualizada ${fmtDate(bcv.updatedAt)}`} className="hidden items-center gap-2 border border-white/25 px-3 py-1.5 text-xs leading-tight lg:flex">
+      <span className="font-display text-base text-[var(--t27-red)]">BCV</span>
+      <span><b className="tabular-nums text-white">{fmtBs(bcv.rate)}</b><span className="block text-[10px] text-gray-500">por USD · {fmtDate(bcv.updatedAt)}</span></span>
+    </div>
+  );
+}
 
 export function SiteHeader({ userName, savedCount, onLogin, onLogout, onMyBuilds, isAdmin, onAdmin }: HeaderProps) {
   return (
@@ -41,6 +53,7 @@ export function SiteHeader({ userName, savedCount, onLogin, onLogout, onMyBuilds
             {links.map((l) => <a key={l.href} href={l.href} className="text-gray-300 transition hover:text-white">{l.label}</a>)}
           </nav>
           <div className="flex items-center gap-2 text-sm">
+            <BcvBadge />
             <a href={STORE.instagramUrl} target="_blank" rel="noopener noreferrer" aria-label="Instagram" className="hidden h-9 w-9 items-center justify-center text-gray-300 hover:text-white sm:flex"><InstagramIcon className="h-5 w-5" /></a>
             {userName ? (
               <>

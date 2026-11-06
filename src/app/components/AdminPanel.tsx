@@ -1,16 +1,16 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { toast } from 'sonner';
 import {
-  BarChart3, Boxes, LogOut, Package, PackageX, RotateCcw, Search, Store, Users, MessageCircle, FolderOpen, AlertTriangle, DollarSign, ClipboardList, ImagePlus, Download, Trash2, Check,
+  BarChart3, Boxes, LogOut, Package, PackageX, Search, Store, Users, MessageCircle, FolderOpen, AlertTriangle, DollarSign, ClipboardList, ImagePlus, Trash2, Check,
 } from 'lucide-react';
 import logo from '../../imports/twenty_seven_tech_logo.png';
 import { pcComponents } from '../data/pc-components';
-import { applyOverrides, baseStock, basePrice, isActive, readOverrides, resetOverrides, setOverride } from '../lib/catalog-admin';
-import { countUsers } from '../lib/auth';
-import { readStats } from '../lib/stats';
+import { PRESETS } from '../data/presets';
+import { isActive, loadCatalog, updatePart } from '../lib/catalog-admin';
+import { api } from '../lib/api';
 import { STORE } from '../data/store-info';
-import { deleteQuote, readQuotes, setQuoteStatus, type QuoteStatus } from '../lib/quotes';
-import { exportImagesZip, fileToWebp, readImages, removeImage, setImage } from '../lib/images';
+import { deleteQuote, fetchQuotes, setQuoteStatus, type Quote, type QuoteStatus } from '../lib/quotes';
+import { fileToWebp, readImages, removeImage, uploadImage } from '../lib/images';
 import type { ComponentCategory } from '../types/pc-component';
 
 const CATEGORY_LABEL: Record<ComponentCategory, string> = {
@@ -26,22 +26,8 @@ interface AdminPanelProps {
   onViewStore: () => void;
 }
 
-/** Lee todos los builds guardados por los clientes de este navegador (demo). */
-function savedBuildsCount(): { total: number; topParts: { id: string; count: number }[] } {
-  let total = 0;
-  const counts = new Map<string, number>();
-  try {
-    for (let i = 0; i < localStorage.length; i++) {
-      const k = localStorage.key(i);
-      if (!k || !k.startsWith('t27.builds.list.')) continue;
-      const list = JSON.parse(localStorage.getItem(k) || '[]') as { parts: Record<string, string> }[];
-      total += list.length;
-      list.forEach((b) => Object.values(b.parts).forEach((id) => counts.set(id, (counts.get(id) ?? 0) + 1)));
-    }
-  } catch { /* datos ilegibles */ }
-  const topParts = [...counts.entries()].sort((a, b) => b[1] - a[1]).slice(0, 5).map(([id, count]) => ({ id, count }));
-  return { total, topParts };
-}
+interface Summary { usuarios: number; cotizaciones: number; guardados: number; compartidos: number; banners: number; top: { id: string; count: number }[] }
+const EMPTY_SUMMARY: Summary = { usuarios: 0, cotizaciones: 0, guardados: 0, compartidos: 0, banners: 0, top: [] };
 
 const money = (n: number) => `$${n.toLocaleString('en-US', { maximumFractionDigits: 0 })}`;
 
@@ -61,6 +47,17 @@ export function AdminPanel({ name, onLogout, onViewStore }: AdminPanelProps) {
   const [version, setVersion] = useState(0);
   const refresh = () => setVersion((v) => v + 1);
 
+  // Pedidos y resumen vienen de PostgreSQL (solo responden si la sesión es de administrador).
+  const [quotes, setQuotes] = useState<Quote[]>([]);
+  const [summary, setSummary] = useState<Summary>(EMPTY_SUMMARY);
+  useEffect(() => {
+    let alive = true;
+    Promise.all([fetchQuotes(), api<Summary>('admin/resumen')])
+      .then(([qs, sm]) => { if (alive) { setQuotes(qs); setSummary(sm); } })
+      .catch((e) => toast.error(e instanceof Error ? e.message : 'No se pudieron cargar los datos'));
+    return () => { alive = false; };
+  }, [version]);
+
   const [query, setQuery] = useState('');
   const [category, setCategory] = useState<ComponentCategory | 'all'>('all');
   const [status, setStatus] = useState<'all' | 'active' | 'inactive' | 'out' | 'low'>('all');
@@ -75,7 +72,7 @@ export function AdminPanel({ name, onLogout, onViewStore }: AdminPanelProps) {
       return { cat, total: all.length, active: all.filter((c) => isActive(c.id)).length };
     });
     const out = pcComponents.filter((c) => c.stock === 0).length;
-    return { out, active, inactive, inventoryValue, low, byCategory, builds: savedBuildsCount(), users: countUsers(), stats: readStats() };
+    return { out, active, inactive, inventoryValue, low, byCategory };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [version]);
 
@@ -92,11 +89,14 @@ export function AdminPanel({ name, onLogout, onViewStore }: AdminPanelProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [query, category, status, version]);
 
-  const update = (id: string, patch: { active?: boolean; price?: number; stock?: number }, message?: string) => {
-    setOverride(id, patch);
-    applyOverrides(pcComponents);
-    refresh();
-    if (message) toast.success(message);
+  const update = async (id: string, patch: { active?: boolean; price?: number; stock?: number }, message?: string) => {
+    const part = pcComponents.find((c) => c.id === id);
+    if (!part) return;
+    try {
+      await updatePart(part, patch); // se guarda en PostgreSQL
+      refresh();
+      if (message) toast.success(message);
+    } catch (e) { toast.error(e instanceof Error ? e.message : 'No se pudo guardar'); refresh(); }
   };
 
   const numberChange = (id: string, field: 'price' | 'stock', raw: string) => {
@@ -105,52 +105,29 @@ export function AdminPanel({ name, onLogout, onViewStore }: AdminPanelProps) {
     update(id, { [field]: field === 'stock' ? Math.floor(n) : n });
   };
 
-  const handleReset = () => {
-    resetOverrides();
-    applyOverrides(pcComponents);
-    refresh();
-    toast.info('Catálogo restablecido a los valores originales');
-  };
-
-  const quotes = useMemo(() => readQuotes(), [version]); // eslint-disable-line react-hooks/exhaustive-deps
   const pendingCount = quotes.filter((q) => q.status === 'pendiente').length;
   const images = useMemo(() => readImages(), [version]); // eslint-disable-line react-hooks/exhaustive-deps
   const [quoteFilter, setQuoteFilter] = useState<QuoteStatus | 'todas'>('pendiente');
 
-  const changeQuote = (id: string, status: QuoteStatus) => {
-    const q = quotes.find((x) => x.id === id);
-    if (!q) return;
-    if (status === 'vendida' && !q.stockApplied) {
-      // Al marcar como vendida se descuenta 1 unidad de cada pieza de la cotización.
-      q.items.forEach((it) => {
-        const part = pcComponents.find((c) => c.id === it.id);
-        if (part) setOverride(it.id, { stock: Math.max(0, part.stock - 1) });
-      });
-      applyOverrides(pcComponents);
-      setQuoteStatus(id, status, true);
-      toast.success('Venta registrada y existencias descontadas');
-    } else {
-      setQuoteStatus(id, status);
-    }
-    refresh();
+  const changeQuote = async (id: number, status: QuoteStatus) => {
+    try {
+      await setQuoteStatus(id, status);
+      if (status === 'vendida') {
+        await loadCatalog(pcComponents, PRESETS); // el servidor descontó las existencias: se vuelven a leer
+        toast.success('Venta registrada y existencias descontadas');
+      }
+      refresh();
+    } catch (e) { toast.error(e instanceof Error ? e.message : 'No se pudo cambiar el estado'); }
   };
 
   const onPickImage = async (id: string, file?: File) => {
     if (!file) return;
-    try { setImage(id, await fileToWebp(file)); refresh(); toast.success('Imagen guardada'); }
+    try { await uploadImage(id, await fileToWebp(file)); refresh(); toast.success('Imagen guardada en la base de datos'); }
     catch (e) { toast.error(e instanceof Error ? e.message : 'No se pudo guardar la imagen'); }
-  };
-  const onExport = () => {
-    const blob = exportImagesZip();
-    if (!blob) return toast.info('Aún no has subido imágenes');
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(blob); a.download = 'components-images.zip'; a.click();
-    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
   };
 
   const nameOf = (id: string) => pcComponents.find((c) => c.id === id)?.name ?? id;
-  const overridesCount = Object.keys(readOverrides()).length;
-  const maxTop = Math.max(1, ...data.builds.topParts.map((p) => p.count));
+  const maxTop = Math.max(1, ...summary.top.map((p) => p.count));
 
   return (
     <div className="flex min-h-screen flex-col bg-black text-white">
@@ -205,10 +182,10 @@ export function AdminPanel({ name, onLogout, onViewStore }: AdminPanelProps) {
               <Kpi icon={AlertTriangle} label={`Stock bajo (${LOW_STOCK} o menos)`} value={data.low.length} hint="Piezas por reponer" tone={data.low.length > 0 ? 'warn' : 'default'} />
             </div>
             <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-              <Kpi icon={Users} label="Clientes registrados" value={data.users} hint="En este navegador" />
-              <Kpi icon={FolderOpen} label="Builds guardados" value={data.builds.total} />
-              <Kpi icon={MessageCircle} label="Cotizaciones por WhatsApp" value={data.stats.quote} />
-              <Kpi icon={Store} label="Builds compartidos" value={data.stats.share} />
+              <Kpi icon={Users} label="Clientes registrados" value={summary.usuarios} hint="Cuentas en la base de datos" />
+              <Kpi icon={FolderOpen} label="Builds guardados" value={summary.guardados} />
+              <Kpi icon={MessageCircle} label="Cotizaciones por WhatsApp" value={summary.cotizaciones} />
+              <Kpi icon={Store} label="Builds compartidos" value={summary.compartidos} />
             </div>
 
             <div className="grid gap-6 lg:grid-cols-2">
@@ -233,11 +210,11 @@ export function AdminPanel({ name, onLogout, onViewStore }: AdminPanelProps) {
               <div className="rounded-2xl border border-white/10 bg-white/5 p-5">
                 <h2 className="font-display text-xl font-bold uppercase">Piezas más guardadas</h2>
                 <p className="mb-4 text-xs text-gray-500">Según los builds guardados por los clientes</p>
-                {data.builds.topParts.length === 0 ? (
+                {summary.top.length === 0 ? (
                   <p className="rounded-xl border border-dashed border-white/10 p-6 text-center text-sm text-gray-500">Aún no hay builds guardados.</p>
                 ) : (
                   <ul className="space-y-3">
-                    {data.builds.topParts.map(({ id, count }) => (
+                    {summary.top.map(({ id, count }) => (
                       <li key={id}>
                         <div className="mb-1 flex justify-between text-sm">
                           <span className="truncate pr-3 text-gray-300">{nameOf(id)}</span>
@@ -285,7 +262,7 @@ export function AdminPanel({ name, onLogout, onViewStore }: AdminPanelProps) {
             </div>
             {quotes.filter((q) => quoteFilter === 'todas' || q.status === quoteFilter).length === 0 ? (
               <p className="rounded-2xl border border-dashed border-white/10 p-10 text-center text-gray-500">
-                No hay cotizaciones aquí. Aparecen cuando un cliente pulsa «Cotizar por WhatsApp».
+                No hay cotizaciones aquí. Aparecen cuando un cliente confirma su pedido.
               </p>
             ) : (
               <ul className="space-y-4">
@@ -293,12 +270,12 @@ export function AdminPanel({ name, onLogout, onViewStore }: AdminPanelProps) {
                   <li key={q.id} className="rounded-2xl border border-white/10 bg-white/5 p-5">
                     <div className="flex flex-wrap items-center justify-between gap-3">
                       <div>
-                        <p className="font-display text-lg font-bold">{q.id} · {q.customer || 'Cliente'}</p>
-                        <p className="text-xs text-gray-500">{[q.code, q.phone, q.email].filter(Boolean).join(' · ')} · {new Date(q.createdAt).toLocaleString('es-VE')}</p>
+                        <p className="font-display text-lg font-bold">{q.code} · {q.customer || 'Cliente'}</p>
+                        <p className="text-xs text-gray-500">{[q.phone, q.email, q.method === 'local' ? 'paga en el local' : 'paga por WhatsApp'].filter(Boolean).join(' · ')} · {new Date(q.createdAt).toLocaleString('es-VE')}</p>
                       </div>
                       <div className="text-right">
                         <p className="font-display text-2xl font-bold">${q.total.toFixed(2)}</p>
-                        <p className="text-xs text-gray-500">con IVA · subtotal ${q.subtotal}</p>
+                        <p className="text-xs text-gray-500">con IVA · subtotal ${q.subtotal.toFixed(2)}</p>
                       </div>
                     </div>
                     <ul className="mt-3 grid gap-1 text-sm text-gray-300 sm:grid-cols-2">
@@ -317,13 +294,13 @@ export function AdminPanel({ name, onLogout, onViewStore }: AdminPanelProps) {
                       {q.status !== 'atendida' && q.status !== 'vendida' && <button onClick={() => changeQuote(q.id, 'atendida')} className="rounded-lg border border-white/10 px-3 py-1.5 hover:border-red-500/60">Marcar atendida</button>}
                       {q.status !== 'vendida' && <button onClick={() => changeQuote(q.id, 'vendida')} className="inline-flex items-center gap-1 rounded-lg bg-red-600 px-3 py-1.5 font-medium hover:bg-red-500"><Check className="h-4 w-4" /> Vendida (descuenta stock)</button>}
                       {q.status !== 'cancelada' && q.status !== 'vendida' && <button onClick={() => changeQuote(q.id, 'cancelada')} className="rounded-lg border border-white/10 px-3 py-1.5 text-gray-400 hover:text-white">Cancelar</button>}
-                      <button onClick={() => { deleteQuote(q.id); refresh(); }} aria-label="Eliminar cotización" className="ml-auto text-gray-500 hover:text-red-400"><Trash2 className="h-4 w-4" /></button>
+                      <button onClick={() => { deleteQuote(q.id).then(refresh).catch(() => toast.error('No se pudo eliminar')); }} aria-label="Eliminar cotización" className="ml-auto text-gray-500 hover:text-red-400"><Trash2 className="h-4 w-4" /></button>
                     </div>
                   </li>
                 ))}
               </ul>
             )}
-            <p className="mt-3 text-xs text-gray-500">La venta se cierra por WhatsApp; aquí solo llevas el control. Demo: las cotizaciones se guardan en este navegador.</p>
+            <p className="mt-3 text-xs text-gray-500">La venta se cierra por WhatsApp; aquí solo llevas el control. Todos los pedidos se guardan en la base de datos PostgreSQL.</p>
           </section>
         )}
 
@@ -354,13 +331,6 @@ export function AdminPanel({ name, onLogout, onViewStore }: AdminPanelProps) {
                 <option value="low">Stock bajo</option>
               </select>
               <span className="text-gray-500">{rows.length} de {pcComponents.length} piezas</span>
-              <button onClick={handleReset} disabled={overridesCount === 0}
-                className="ml-auto inline-flex items-center gap-2 rounded-lg border border-white/10 px-3 py-2 text-gray-300 hover:border-red-500/60 hover:text-white disabled:opacity-40">
-                <RotateCcw className="h-4 w-4" /> Restablecer catálogo
-              </button>
-              <button onClick={onExport} className="inline-flex items-center gap-2 rounded-lg border border-white/10 px-3 py-2 text-gray-300 hover:border-red-500/60 hover:text-white">
-                <Download className="h-4 w-4" /> Exportar imágenes (.zip)
-              </button>
             </div>
 
             <div className="overflow-x-auto rounded-2xl border border-white/10">
@@ -385,7 +355,7 @@ export function AdminPanel({ name, onLogout, onViewStore }: AdminPanelProps) {
                             {images[c.id] ? <img src={images[c.id]} alt="" className="h-full w-full object-contain" /> : <ImagePlus className="h-5 w-5 text-gray-500" />}
                             <input type="file" accept="image/*" className="sr-only" aria-label={`Imagen de ${c.name}`} onChange={(e) => { onPickImage(c.id, e.target.files?.[0]); e.target.value = ''; }} />
                           </label>
-                          {images[c.id] && <button onClick={() => { removeImage(c.id); refresh(); }} className="mt-1 text-[11px] text-gray-500 hover:text-red-400">Quitar</button>}
+                          {images[c.id] && <button onClick={() => { removeImage(c.id).then(refresh).catch(() => toast.error('No se pudo quitar')); }} className="mt-1 text-[11px] text-gray-500 hover:text-red-400">Quitar</button>}
                         </td>
                         <td className="px-4 py-3">
                           <p className={`font-medium ${on ? 'text-white' : 'text-gray-500 line-through'}`}>{c.name}</p>
@@ -401,7 +371,6 @@ export function AdminPanel({ name, onLogout, onViewStore }: AdminPanelProps) {
                             onBlur={(e) => numberChange(c.id, 'price', e.target.value)}
                             className="w-24 rounded-lg border border-white/10 bg-zinc-900 px-2 py-1.5 text-white outline-none focus:border-red-500"
                           />
-                          {basePrice(c.id) !== undefined && basePrice(c.id) !== c.price && <span className="ml-2 text-xs text-red-400">antes ${basePrice(c.id)}</span>}
                         </td>
                         <td className="px-4 py-3">
                           <input
@@ -413,7 +382,6 @@ export function AdminPanel({ name, onLogout, onViewStore }: AdminPanelProps) {
                             className="w-20 rounded-lg border border-white/10 bg-zinc-900 px-2 py-1.5 text-white outline-none focus:border-red-500"
                           />
                           <span className={`ml-2 rounded-full px-2 py-0.5 text-[11px] font-bold ${c.stock === 0 ? 'bg-red-600 text-white' : c.stock <= LOW_STOCK ? 'bg-amber-500/20 text-amber-300' : 'bg-emerald-500/15 text-emerald-300'}`}>{c.stock === 0 ? 'Agotado' : c.stock <= LOW_STOCK ? 'Stock bajo' : 'En stock'}</span>
-                          {baseStock(c.id) !== undefined && baseStock(c.id) !== c.stock && <span className="ml-2 text-xs text-gray-500">antes {baseStock(c.id)}</span>}
                         </td>
                         <td className="px-4 py-3">
                           <button
@@ -437,7 +405,7 @@ export function AdminPanel({ name, onLogout, onViewStore }: AdminPanelProps) {
               </table>
             </div>
             <p className="mt-3 text-xs text-gray-500">
-              Los cambios se aplican al instante en el configurador de los clientes. Las piezas desactivadas dejan de mostrarse en el catálogo.
+              Los cambios se guardan en PostgreSQL y se ven al instante en el configurador de los clientes. Las piezas desactivadas dejan de mostrarse en el catálogo.
             </p>
           </section>
         )}

@@ -1,7 +1,10 @@
 import { PCComponent } from '../types/pc-component';
-import { applyOverrides, isActive } from '../lib/catalog-admin';
+import { isActive } from '../lib/catalog-admin';
 
 /**
+ * Catálogo de RESPALDO (si la API no responde). El catálogo real vive en PostgreSQL (tabla componente)
+ * y se carga al abrir la página con loadCatalog().
+ *
  * Catálogo alineado con lo que vende Twenty Seven Tech (Ryzen 5 5600X / 8600G /
  * 8700F / 9800X3D, Core i5-12400F / 14400, RTX 3060 / 5060 / 5070 / 5070 Ti,
  * RX 6600 / 9070 XT, plataformas AM4, AM5 y LGA1700).
@@ -15,11 +18,11 @@ import { applyOverrides, isActive } from '../lib/catalog-admin';
 export const pcComponents: PCComponent[] = [
   // ───────── CPU ─────────
   { id: 'cpu-1', brand: 'AMD', name: 'Ryzen 5 5600X', category: 'cpu', price: 135, specs: '6 núcleos / 12 hilos • 4.6 GHz • Socket AM4', stock: 14, rating: 4, socket: 'AM4', tag: 'Mejor precio' },
-  { id: 'cpu-2', brand: 'AMD', name: 'Ryzen 5 8600G', category: 'cpu', price: 215, specs: '6 núcleos / 12 hilos • 5.0 GHz • Gráficos Radeon 760M • AM5', stock: 10, rating: 4, socket: 'AM5', tag: 'Con video integrado' },
+  { id: 'cpu-2', brand: 'AMD', name: 'Ryzen 5 8600G', category: 'cpu', price: 215, specs: '6 núcleos / 12 hilos • 5.0 GHz • Gráficos Radeon 760M • AM5', stock: 10, rating: 4, socket: 'AM5', igpu: 'Radeon 760M', tag: 'Con video integrado' },
   { id: 'cpu-3', brand: 'AMD', name: 'Ryzen 7 8700F', category: 'cpu', price: 245, specs: '8 núcleos / 16 hilos • 5.0 GHz • Socket AM5', stock: 8, rating: 5, socket: 'AM5' },
-  { id: 'cpu-4', brand: 'AMD', name: 'Ryzen 7 9800X3D', category: 'cpu', price: 520, specs: '8 núcleos / 16 hilos • 5.2 GHz • 3D V-Cache • AM5', stock: 4, rating: 5, socket: 'AM5', tag: 'El mejor para gaming' },
+  { id: 'cpu-4', brand: 'AMD', name: 'Ryzen 7 9800X3D', category: 'cpu', price: 520, specs: '8 núcleos / 16 hilos • 5.2 GHz • 3D V-Cache • Gráficos integrados básicos • AM5', stock: 4, rating: 5, socket: 'AM5', igpu: 'Radeon Graphics (RDNA 2, básico)', tag: 'El mejor para gaming' },
   { id: 'cpu-5', brand: 'Intel', name: 'Core i5-12400F', category: 'cpu', price: 125, specs: '6 núcleos / 12 hilos • 4.4 GHz • LGA1700 (sin video)', stock: 18, rating: 4, socket: 'LGA1700', tag: 'Más vendido' },
-  { id: 'cpu-6', brand: 'Intel', name: 'Core i5-14400', category: 'cpu', price: 205, specs: '10 núcleos / 16 hilos • 4.7 GHz • LGA1700', stock: 9, rating: 5, socket: 'LGA1700' },
+  { id: 'cpu-6', brand: 'Intel', name: 'Core i5-14400', category: 'cpu', price: 205, specs: '10 núcleos / 16 hilos • 4.7 GHz • Gráficos UHD 730 integrados • LGA1700', stock: 9, rating: 5, socket: 'LGA1700', igpu: 'Intel UHD Graphics 730' },
 
   // ───────── Placa base ─────────
   { id: 'mb-1', brand: 'ASRock', name: 'B450M Pro4', category: 'motherboard', price: 80, specs: 'AM4 • DDR4 • M.2 NVMe • mATX', stock: 12, rating: 4, socket: 'AM4', chipset: 'B450', ramType: 'DDR4', formFactor: 'mATX' },
@@ -63,9 +66,6 @@ export const pcComponents: PCComponent[] = [
   { id: 'case-3', brand: 'Redragon', name: 'Gabinete Panorámico Dual Cámara', category: 'case', price: 95, specs: 'Media torre • Vista panorámica • Buen flujo de aire', stock: 8, rating: 5, supportedForms: ['mATX', 'ATX'] },
   { id: 'case-4', brand: 'Corsair', name: '4000D Airflow', category: 'case', price: 110, specs: 'Media torre • Malla frontal • Hasta ATX', stock: 7, rating: 5, supportedForms: ['mATX', 'ATX'] },
 ];
-
-// Precio y existencias que el administrador haya ajustado en el panel.
-applyOverrides(pcComponents);
 
 /** Piezas que los clientes pueden elegir: solo las que el administrador dejó disponibles. */
 export function getCategoryComponents(category: string): PCComponent[] {

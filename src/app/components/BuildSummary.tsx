@@ -2,6 +2,8 @@ import { ComponentCategory, PCComponent } from '../types/pc-component';
 import { CheckCircle2, AlertTriangle, X, FileDown, Share2, MessageCircle } from 'lucide-react';
 import { TAX_RATE } from '../data/store-info';
 import { analyzeBuildPerformance } from '../utils/build-performance';
+import { requiredCategories } from '../utils/compatibility';
+import { fmtBs, useBcv } from '../lib/bcv';
 
 interface BuildSummaryProps {
   components: { [key in ComponentCategory]?: PCComponent };
@@ -20,12 +22,15 @@ const ORDER: { id: ComponentCategory; label: string }[] = [
 ];
 
 export function BuildSummary({ components, totalPrice, compatibilityIssues, onRemove, onSave, onShare, onCheckout, completionPercentage }: BuildSummaryProps) {
-  const chosen = Object.keys(components).length;
-  const isComplete = completionPercentage === 100;
+  const required = requiredCategories(components);
+  const chosen = required.filter((c) => components[c]).length;
+  const igpu = !components.gpu ? components.cpu?.igpu : undefined;
+  const isComplete = chosen === required.length;
   const isCompatible = compatibilityIssues.length === 0;
+  const bcv = useBcv();
   const tax = totalPrice * TAX_RATE;
   const total = totalPrice + tax;
-  const perf = components.gpu ? analyzeBuildPerformance(components) : null;
+  const perf = components.gpu || igpu ? analyzeBuildPerformance(components) : null;
   const canOrder = isComplete && isCompatible;
 
   return (
@@ -33,7 +38,7 @@ export function BuildSummary({ components, totalPrice, compatibilityIssues, onRe
       <div className="border-b border-white/15 p-4">
         <div className="flex items-baseline justify-between">
           <h2 className="font-display text-3xl">Tu equipo</h2>
-          <span className="text-sm text-gray-400">{chosen} de 7 piezas</span>
+          <span className="text-sm text-gray-400">{chosen} de {required.length} piezas</span>
         </div>
         <div className="mt-3 h-1 bg-white/10"><div className="h-1 bg-[var(--t27-red)] transition-all" style={{ width: `${completionPercentage}%` }} /></div>
       </div>
@@ -45,7 +50,7 @@ export function BuildSummary({ components, totalPrice, compatibilityIssues, onRe
             <li key={id} className="flex items-start justify-between gap-2 px-4 py-2.5">
               <div className="min-w-0">
                 <p className="text-xs text-gray-500">{label}</p>
-                {c ? <p className="text-sm leading-snug">{c.name}</p> : <p className="text-sm text-gray-600">Sin elegir</p>}
+                {c ? <p className="text-sm leading-snug">{c.name}</p> : id === 'gpu' && igpu ? <p className="text-sm text-gray-300">Gráficos integrados <span className="text-gray-500">· {igpu}</span></p> : <p className="text-sm text-gray-600">Sin elegir</p>}
               </div>
               {c && (
                 <div className="flex shrink-0 items-center gap-2">
@@ -83,11 +88,12 @@ export function BuildSummary({ components, totalPrice, compatibilityIssues, onRe
         <div className="flex items-baseline justify-between border-t border-white/15 pt-2">
           <span>Total</span><span className="font-display text-4xl text-[var(--t27-red)]">${total.toFixed(2)}</span>
         </div>
+        {bcv && total > 0 && <p className="text-right text-xs text-gray-500">≈ {fmtBs(total * bcv.rate)} <span className="text-gray-600">(tasa BCV {bcv.rate.toLocaleString('es-VE', { minimumFractionDigits: 2 })})</span></p>}
 
         <button onClick={onCheckout} disabled={!canOrder} className="cut mt-3 flex w-full items-center justify-center gap-2 bg-[var(--t27-red)] py-3 font-semibold text-white transition hover:bg-red-500 disabled:cursor-not-allowed disabled:bg-white/10 disabled:text-gray-500">
           <MessageCircle className="h-4 w-4" /> Finalizar pedido
         </button>
-        {!canOrder && <p className="text-center text-xs text-gray-500">{!isComplete ? `Faltan ${7 - chosen} piezas para finalizar.` : 'Corrige la compatibilidad para finalizar.'}</p>}
+        {!canOrder && <p className="text-center text-xs text-gray-500">{!isComplete ? `Faltan ${required.length - chosen} piezas para finalizar.` : 'Corrige la compatibilidad para finalizar.'}</p>}
         <div className="grid grid-cols-2 gap-2 pt-1">
           <button onClick={onSave} disabled={!isComplete} className="flex items-center justify-center gap-1.5 border border-white/25 py-2 text-xs hover:bg-white hover:text-black disabled:opacity-40"><FileDown className="h-3.5 w-3.5" /> Presupuesto</button>
           <button onClick={onShare} disabled={!isComplete} className="flex items-center justify-center gap-1.5 border border-white/25 py-2 text-xs hover:bg-white hover:text-black disabled:opacity-40"><Share2 className="h-3.5 w-3.5" /> Compartir</button>

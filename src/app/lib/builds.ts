@@ -1,28 +1,19 @@
-// Guarda builds por usuario en el navegador (demo). Se guardan solo los ids.
+// Builds guardados por usuario: se guardan en PostgreSQL (tabla build_guardado).
+// Solo el "borrador" (lo que vas armando) queda en el navegador para no perderlo al recargar.
 import { ComponentCategory } from '../types/pc-component';
+import { api } from './api';
 
 export type PartIds = { [key in ComponentCategory]?: string };
 export interface SavedBuildEntry { id: string; name: string; date: string; parts: PartIds }
 
-const key = (email: string, kind: 'list' | 'draft') => `t27.builds.${kind}.${email}`;
+export const listBuilds = (): Promise<SavedBuildEntry[]> => api<SavedBuildEntry[]>('builds');
+export const saveBuildEntry = (name: string, parts: PartIds) => api('builds', { method: 'POST', body: { nombre: name, piezas: parts } });
+export const deleteBuildEntry = (id: string) => api(`builds/${encodeURIComponent(id)}`, { method: 'DELETE' });
 
-export function listBuilds(email: string): SavedBuildEntry[] {
-  try { return JSON.parse(localStorage.getItem(key(email, 'list')) || '[]'); } catch { return []; }
-}
-export function saveBuildEntry(email: string, name: string, parts: PartIds): SavedBuildEntry[] {
-  const entry = { id: String(Date.now()), name, date: new Date().toLocaleDateString('es-VE'), parts };
-  const next = [entry, ...listBuilds(email)].slice(0, 12);
-  localStorage.setItem(key(email, 'list'), JSON.stringify(next));
-  return next;
-}
-export function deleteBuildEntry(email: string, id: string): SavedBuildEntry[] {
-  const next = listBuilds(email).filter((b) => b.id !== id);
-  localStorage.setItem(key(email, 'list'), JSON.stringify(next));
-  return next;
-}
+const draftKey = (email: string) => `t27.builds.draft.${email}`;
 export function loadDraft(email: string): PartIds {
-  try { return JSON.parse(localStorage.getItem(key(email, 'draft')) || '{}'); } catch { return {}; }
+  try { return JSON.parse(localStorage.getItem(draftKey(email)) || '{}'); } catch { return {}; }
 }
 export function saveDraft(email: string, parts: PartIds) {
-  try { localStorage.setItem(key(email, 'draft'), JSON.stringify(parts)); } catch { /* sin espacio */ }
+  try { localStorage.setItem(draftKey(email), JSON.stringify(parts)); } catch { /* sin espacio */ }
 }

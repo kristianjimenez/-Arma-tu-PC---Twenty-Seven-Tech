@@ -63,6 +63,17 @@ export function validateCompatibility(build: PCBuild): string[] {
   return issues;
 }
 
+/** Con un procesador que trae gráficos integrados, la tarjeta gráfica es opcional. */
+export function hasIntegratedGraphics(parts: Parts): boolean {
+  return !!parts.cpu?.igpu;
+}
+
+/** Piezas obligatorias del build: las 7, menos la gráfica si el CPU ya trae video. */
+export function requiredCategories(parts: Parts): ComponentCategory[] {
+  const all: ComponentCategory[] = ['cpu', 'motherboard', 'ram', 'gpu', 'storage', 'power', 'case'];
+  return hasIntegratedGraphics(parts) ? all.filter((c) => c !== 'gpu') : all;
+}
+
 export function calculateTotal(components: Parts): number {
   return Object.values(components).reduce((total, c) => total + (c?.price || 0), 0);
 }

@@ -2,10 +2,10 @@ import { useEffect, useRef, useState } from 'react';
 import { ComponentCategory, PCComponent, PCBuild } from './types/pc-component';
 import { getCategoryComponents, pcComponents } from './data/pc-components';
 import { Preset, PRESETS } from './data/presets';
-import { validateCompatibility, calculateTotal, getConflict } from './utils/compatibility';
+import { validateCompatibility, calculateTotal, getConflict, requiredCategories } from './utils/compatibility';
 import { analyzeBuildPerformance } from './utils/build-performance';
 import { deleteBuildEntry, listBuilds, loadDraft, PartIds, saveBuildEntry, saveDraft, SavedBuildEntry } from './lib/builds';
-import { clearSession, getSession, type Session } from './lib/auth';
+import { clearSession, getSession, verifySession, type Session } from './lib/auth';
 import { STORE, TAX_RATE } from './data/store-info';
 import { ComponentCard } from './components/ComponentCard';
 import { BuildSummary } from './components/BuildSummary';
@@ -18,7 +18,7 @@ import { Hero, ReadyBuilds, HowToBuy, StoreSection } from './components/Landing'
 import { Footer } from './components/Footer';
 import { AdminPanel } from './components/AdminPanel';
 import { track } from './lib/stats';
-import { isActive } from './lib/catalog-admin';
+import { isActive, loadCatalog } from './lib/catalog-admin';
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from './components/ui/sheet';
 import { ChevronRight, ChevronLeft, ListChecks, Save, Trash2 } from 'lucide-react';
 import { toast, Toaster } from 'sonner';
@@ -35,7 +35,8 @@ const categories: { id: ComponentCategory; label: string; title: string; hint: s
 ];
 
 const emptyBuild: PCBuild = { components: {}, totalPrice: 0, compatibilityIssues: [] };
-const FEATURED = PRESETS[1];
+// El equipo destacado de la demo (PRESETS se actualiza en sitio con lo que haya en la base de datos)
+const getFeatured = () => PRESETS.find((p) => p.id === '1080p') ?? PRESETS[1];
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const goToBuilder = () => document.getElementById('armar')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
 
@@ -58,7 +59,7 @@ export default function App() {
   const [view, setView] = useState<'site' | 'login' | 'admin'>(() => (getSession()?.role === 'admin' ? 'admin' : 'site'));
   const [selectedCategory, setSelectedCategory] = useState<ComponentCategory>('cpu');
   const [build, setBuild] = useState<PCBuild>(() => buildFromIds(loadDraft(getSession()?.email ?? 'anon')));
-  const [savedBuilds, setSavedBuilds] = useState<SavedBuildEntry[]>(() => { const s = getSession(); return s ? listBuilds(s.email) : []; });
+  const [savedBuilds, setSavedBuilds] = useState<SavedBuildEntry[]>([]);
   const [buildsOpen, setBuildsOpen] = useState(false);
   const [checkoutOpen, setCheckoutOpen] = useState(false);
   const [saveDialogOpen, setSaveDialogOpen] = useState(false);
@@ -67,6 +68,22 @@ export default function App() {
   const [onlyCompatible, setOnlyCompatible] = useState(false);
   const [demoRunning, setDemoRunning] = useState(false);
   const demoToken = useRef(0);
+  const [, setCatalogVersion] = useState(0);
+  useEffect(() => {
+    const bump = () => setCatalogVersion((v) => v + 1);
+    window.addEventListener('t27-catalog', bump);
+    loadCatalog(pcComponents, PRESETS); // catálogo, precios y existencias desde PostgreSQL
+    // El servidor confirma si la sesión sigue vigente y qué rol tiene de verdad.
+    verifySession().then((s) => {
+      setSession(s);
+      if (!s) setView((v) => (v === 'admin' ? 'site' : v));
+    });
+    return () => window.removeEventListener('t27-catalog', bump);
+  }, []);
+
+  // Mis builds: se leen de la base de datos cada vez que cambia la sesión.
+  const refreshBuilds = () => listBuilds().then(setSavedBuilds).catch(() => setSavedBuilds([]));
+  useEffect(() => { if (session) refreshBuilds(); else setSavedBuilds([]); }, [session?.email]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const stepIndex = categories.findIndex((c) => c.id === selectedCategory);
   const current = categories[stepIndex];
@@ -75,7 +92,10 @@ export default function App() {
     .filter((c) => !onlyCompatible || !getConflict(c, build.components))
     .sort((a, b) => (sortBy === 'asc' ? a.price - b.price : sortBy === 'desc' ? b.price - a.price : 0));
   const chosen = Object.keys(build.components).length;
-  const completion = Math.round((chosen / categories.length) * 100);
+  const required = requiredCategories(build.components);
+  const requiredChosen = required.filter((c) => build.components[c]).length;
+  const completion = Math.round((requiredChosen / required.length) * 100);
+  const cpuIgpu = build.components.cpu?.igpu; // si el procesador trae video, la gráfica es opcional
   const totalWithTax = build.totalPrice * (1 + TAX_RATE);
 
   useEffect(() => { saveDraft(session?.email ?? 'anon', idsOf(build)); }, [build, session]);
@@ -113,6 +133,7 @@ export default function App() {
 
   // Demo guiada: arma un PC paso a paso (útil para mostrar el flujo completo)
   const handleDemo = async () => {
+    const FEATURED = getFeatured();
     if (blockUnavailablePreset(FEATURED)) return;
     const token = ++demoToken.current;
     setDemoRunning(true);
@@ -136,13 +157,15 @@ export default function App() {
 
   const handleClear = () => { demoToken.current++; setDemoRunning(false); setBuild(emptyBuild); setSelectedCategory('cpu'); };
 
-  const handleSaveBuild = () => {
+  const handleSaveBuild = async () => {
     if (!session) { toast.info('Ingresa para guardar tus builds'); setView('login'); return; }
     if (chosen === 0) return;
-    const label = build.components.gpu ? analyzeBuildPerformance(build.components).tierLabel : 'Build en progreso';
-    setSavedBuilds(saveBuildEntry(session.email, `${label} • $${build.totalPrice}`, idsOf(build)));
-    track('save');
-    toast.success('Guardado en "Mis builds"');
+    const label = build.components.gpu || cpuIgpu ? analyzeBuildPerformance(build.components).tierLabel : 'Build en progreso';
+    try {
+      await saveBuildEntry(`${label} • $${build.totalPrice}`, idsOf(build));
+      await refreshBuilds();
+      toast.success('Guardado en "Mis builds"');
+    } catch (e) { toast.error(e instanceof Error ? e.message : 'No se pudo guardar'); }
   };
 
   const handleShare = async () => {
@@ -156,7 +179,6 @@ export default function App() {
 
   const handleLogin = (s: Session) => {
     setSession(s);
-    setSavedBuilds(listBuilds(s.email));
     if (Object.keys(build.components).length === 0) setBuild(buildFromIds(loadDraft(s.email)));
     setView(s.role === 'admin' ? 'admin' : 'site');
     toast.success(`Hola, ${s.name.split(' ')[0]}`);
@@ -188,7 +210,7 @@ export default function App() {
       <Toaster theme="dark" position="top-center" toastOptions={{ style: { borderRadius: 0 } }} />
       <SiteHeader userName={session?.name} savedCount={savedBuilds.length} onLogin={() => setView('login')} onLogout={handleLogout} onMyBuilds={() => setBuildsOpen(true)} isAdmin={session?.role === 'admin'} onAdmin={() => setView('admin')} />
 
-      <Hero onStart={goToBuilder} onLoadFeatured={() => handleLoadPreset(FEATURED)} />
+      <Hero onStart={goToBuilder} onLoadFeatured={() => handleLoadPreset(getFeatured())} />
       <ReadyBuilds onLoad={handleLoadPreset} onDemo={handleDemo} disabled={demoRunning} />
 
       {/* Configurador */}
@@ -205,7 +227,7 @@ export default function App() {
                 return (
                   <button key={id} onClick={() => setSelectedCategory(id)} aria-current={active ? 'step' : undefined}
                     className={`flex shrink-0 items-center gap-2 border-b-2 px-4 py-3 text-sm transition ${active ? 'border-[var(--t27-red)] bg-white/10 text-white' : done ? 'border-white/40 text-white' : 'border-transparent text-gray-500 hover:text-white'}`}>
-                    <span className={`font-display flex h-6 w-6 items-center justify-center text-base ${done ? 'bg-[var(--t27-red)] text-white' : 'bg-white/10'}`}>{i + 1}</span>{label}
+                    <span className={`font-display flex h-6 w-6 items-center justify-center text-base ${done ? 'bg-[var(--t27-red)] text-white' : 'bg-white/10'}`}>{i + 1}</span>{label}{id === 'gpu' && cpuIgpu && !done && <span className="ml-1 text-[10px] uppercase text-gray-500">opcional</span>}
                   </button>
                 );
               })}
@@ -215,6 +237,20 @@ export default function App() {
               <h3 className="font-cond text-3xl">{stepIndex + 1}. {current.title}</h3>
               <p className="text-sm text-gray-400">{current.hint}</p>
             </div>
+
+            {selectedCategory === 'gpu' && (
+              <div className={`mt-4 border p-4 text-sm ${cpuIgpu ? 'border-[var(--t27-red)]/60 bg-[var(--t27-red)]/10' : 'border-white/15 bg-white/5'}`}>
+                {cpuIgpu ? (
+                  <>
+                    <p className="font-semibold text-white">Este paso es opcional</p>
+                    <p className="mt-1 text-gray-300">Tu {build.components.cpu!.name} ya trae gráficos integrados ({cpuIgpu}). Puedes armar tu PC sin tarjeta gráfica, ideal para oficina, estudio y juegos ligeros. Si más adelante quieres jugar con más calidad, agrégala cuando quieras.</p>
+                    <button onClick={() => setSelectedCategory('storage')} className="mt-3 bg-white px-4 py-2 font-medium text-black hover:bg-gray-200">Continuar sin tarjeta gráfica</button>
+                  </>
+                ) : (
+                  <p className="text-gray-300">{build.components.cpu ? `Tu ${build.components.cpu.name} no trae video integrado, por eso necesitas una tarjeta gráfica.` : 'Si eliges un procesador con gráficos integrados (por ejemplo Ryzen 5 8600G o Core i5-14400), este paso pasa a ser opcional.'}</p>
+                )}
+              </div>
+            )}
 
             <div className="mt-4 flex flex-wrap items-center gap-2 text-sm">
               <select value={sortBy} onChange={(e) => setSortBy(e.target.value as typeof sortBy)} aria-label="Ordenar" className="border border-white/20 bg-black px-3 py-2 text-gray-200">
@@ -261,7 +297,7 @@ export default function App() {
       {chosen > 0 && (
         <div className="fixed inset-x-0 bottom-0 z-40 border-t border-white/20 bg-black p-3 lg:hidden">
           <div className="mx-auto flex max-w-xl items-center justify-between gap-3">
-            <div><p className="text-xs text-gray-400">{chosen} de 7 piezas • con IVA</p><p className="font-display text-3xl text-[var(--t27-red)]">${totalWithTax.toFixed(2)}</p></div>
+            <div><p className="text-xs text-gray-400">{requiredChosen} de {required.length} piezas • con IVA</p><p className="font-display text-3xl text-[var(--t27-red)]">${totalWithTax.toFixed(2)}</p></div>
             <button onClick={() => setSummaryOpen(true)} className="flex items-center gap-2 bg-[var(--t27-red)] px-5 py-3 text-sm font-semibold"><ListChecks className="h-4 w-4" /> Ver mi equipo</button>
           </div>
         </div>
@@ -276,7 +312,7 @@ export default function App() {
 
       <MyBuildsSheet open={buildsOpen} onOpenChange={setBuildsOpen} builds={savedBuilds}
         onLoad={(b) => { setBuild(buildFromIds(b.parts)); setBuildsOpen(false); goToBuilder(); toast.success('Build cargado'); }}
-        onDelete={(id) => session && setSavedBuilds(deleteBuildEntry(session.email, id))} />
+        onDelete={(id) => deleteBuildEntry(id).then(refreshBuilds).catch(() => toast.error('No se pudo eliminar'))} />
 
       <CheckoutDialog open={checkoutOpen} onOpenChange={setCheckoutOpen} build={build} defaultName={session?.name} defaultEmail={session?.email}
         onDownloadBudget={() => { setCheckoutOpen(false); setSaveDialogOpen(true); }} />

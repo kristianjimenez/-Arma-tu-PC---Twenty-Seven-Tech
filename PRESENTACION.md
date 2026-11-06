@@ -23,7 +23,7 @@ Esto es un apoyo para ordenar la presentación; las palabras las ponen ustedes.
    - Panel de **rendimiento** (qué juegos corre).
    - **Finalizar pedido**: elegir pagar por WhatsApp o en el local, escribir nombre y teléfono, y se abre WhatsApp con el pedido (con código T27-...) ya redactado. Mostrar el mensaje en el celular.
    - Descargar presupuesto (banner/PDF) y "Mis builds" (requiere cuenta).
-4. **Cómo está hecho (2 min):** React + TypeScript + Vite + Tailwind; reglas de compatibilidad en `utils/compatibility.ts`; datos en `data/`; sesión y builds en localStorage.
+4. **Cómo está hecho (2 min):** React + TypeScript + Vite + Tailwind; reglas de compatibilidad en `utils/compatibility.ts`; catálogo, usuarios, pedidos e imágenes en PostgreSQL (Neon) a través de una API en Vercel (`api/`).
 5. **Limitaciones y trabajo futuro (1 min):** backend con base de datos, precios desde inventario real, más reglas (altura de cooler, largo de GPU), panel de administración para la tienda.
 6. **Cierre + preguntas.**
 
@@ -39,7 +39,7 @@ Esto es un apoyo para ordenar la presentación; las palabras las ponen ustedes.
 - **¿Por qué React / TypeScript?** Componentes reutilizables y tipos que evitan errores (p. ej. una pieza sin socket).
 - **¿Cómo le llega el pedido a la tienda?** Por WhatsApp: la página arma el mensaje y el cliente lo envía. Sin backend, la tienda no ve el pedido hasta que llega ese mensaje (se dice así en pantalla). Siguiente paso: API + panel de pedidos.
 - **¿Hay que registrarse para comprar?** No. La cuenta solo sirve para guardar builds.
-- **¿Los usuarios son reales?** Es una demo local (hash SHA-256 en el navegador). En producción: backend, hash con sal (bcrypt/argon2) y sesiones/JWT.
+- **¿Los usuarios son reales?** Sí: se guardan en PostgreSQL con la clave cifrada con scrypt y sal (nunca en texto), y sesiones con token aleatorio del que solo se guarda el hash. El rol de administrador lo valida el servidor.
 - **¿De dónde salen los precios?** Del catálogo de la tienda, cargado en un archivo; el siguiente paso es conectarlo al inventario.
 - **¿Qué pasa si la tienda cambia un precio?** Se edita un solo archivo; sin tocar la lógica.
 - **¿Qué no valida?** Altura del cooler, largo de la GPU, consumo exacto (usa la potencia recomendada del fabricante).
