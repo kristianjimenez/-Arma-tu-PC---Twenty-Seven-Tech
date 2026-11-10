@@ -8,7 +8,7 @@ export const STORE = {
   whatsappDisplay: '+58 414-2869332',
   instagramUser: 'twentyseventech',
   instagramUrl: 'https://www.instagram.com/twentyseventech/',
-  whatsappUrl: 'https://wa.me/584142869332',
+  whatsappUrl: 'https://wa.me/584220460484',
   address: 'Caracas, C.C. Parque Carabobo (CPC), Planta Baja, Sector Feria, Local LM11',
   mapsUrl: 'https://www.google.com/maps/search/?api=1&query=' + encodeURIComponent('Centro Parque Carabobo CPC Caracas'),
   warranty: 'Garantía de 6 meses en equipos armados',
