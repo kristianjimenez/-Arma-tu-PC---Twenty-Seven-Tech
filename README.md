@@ -157,3 +157,15 @@ Entra con el usuario `admin`. El servidor comprueba el rol en **cada** petición
 - **Dashboard:** piezas disponibles/desactivadas/agotadas, valor del inventario, clientes, builds guardados, pedidos y las piezas más guardadas (consultas SQL).
 - **Pendientes:** todos los pedidos de todos los clientes y dispositivos; estados *pendiente → atendida → vendida / cancelada*. «Vendida» descuenta existencias.
 - **Inventario:** editar precio, existencias, disponibilidad y subir la foto de cada pieza (se guarda en PostgreSQL). Los cambios los ve cualquier cliente al instante.
+
+
+## Inventario (CRUD) en el panel de administración
+
+En **Admin → Inventario** el administrador puede:
+
+- **Agregar** una pieza nueva (botón "Nueva pieza"): categoría, marca, modelo, precio, existencias, especificaciones y los datos de compatibilidad que correspondan a la categoría (socket, tipo de RAM, formato de placa, vatios de la fuente, formatos que acepta el case, etc.).
+- **Editar** cualquier dato de una pieza, incluida su compatibilidad (ícono de lápiz).
+- **Descontinuar** una pieza con el interruptor "Disponible": deja de mostrarse a los clientes, pero conserva su historial.
+- **Eliminar** una pieza (ícono de papelera). El servidor solo lo permite si la pieza nunca se usó en pedidos, equipos preconfigurados ni builds guardados; si ya se usó, hay que descontinuarla.
+
+Rutas de la API (solo administrador): `POST /api/componentes`, `PUT /api/componentes?id=...`, `DELETE /api/componentes?id=...`. El servidor valida todo (categoría, precio, existencias, compatibilidad), por lo que las reglas de compatibilidad del configurador funcionan también con las piezas nuevas.

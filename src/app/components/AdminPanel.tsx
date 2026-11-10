@@ -1,17 +1,18 @@
 import { useEffect, useMemo, useState } from 'react';
 import { toast } from 'sonner';
 import {
-  BarChart3, Boxes, LogOut, Package, PackageX, Search, Store, Users, MessageCircle, FolderOpen, AlertTriangle, DollarSign, ClipboardList, ImagePlus, Trash2, Check,
+  BarChart3, Boxes, LogOut, Package, PackageX, Search, Store, Users, MessageCircle, FolderOpen, AlertTriangle, DollarSign, ClipboardList, ImagePlus, Trash2, Check, Plus, Pencil,
 } from 'lucide-react';
 import logo from '../../imports/twenty_seven_tech_logo.png';
 import { pcComponents } from '../data/pc-components';
 import { PRESETS } from '../data/presets';
-import { isActive, loadCatalog, updatePart } from '../lib/catalog-admin';
+import { createPart, deletePart, isActive, loadCatalog, savePart, updatePart, type PartInput } from '../lib/catalog-admin';
+import { PartFormDialog } from './PartFormDialog';
 import { api } from '../lib/api';
 import { STORE } from '../data/store-info';
 import { deleteQuote, fetchQuotes, setQuoteStatus, type Quote, type QuoteStatus } from '../lib/quotes';
 import { fileToWebp, readImages, removeImage, uploadImage } from '../lib/images';
-import type { ComponentCategory } from '../types/pc-component';
+import type { ComponentCategory, PCComponent } from '../types/pc-component';
 
 const CATEGORY_LABEL: Record<ComponentCategory, string> = {
   cpu: 'Procesadores', motherboard: 'Placas base', ram: 'Memoria RAM', gpu: 'Tarjetas gráficas',
@@ -57,6 +58,23 @@ export function AdminPanel({ name, onLogout, onViewStore }: AdminPanelProps) {
       .catch((e) => toast.error(e instanceof Error ? e.message : 'No se pudieron cargar los datos'));
     return () => { alive = false; };
   }, [version]);
+
+  // Alta y edición de piezas (CRUD del inventario)
+  const [form, setForm] = useState<{ part?: PCComponent } | null>(null);
+  const known = useMemo(() => ({
+    sockets: [...new Set(pcComponents.map((c) => c.socket).filter(Boolean) as string[])],
+    chipsets: [...new Set(pcComponents.map((c) => c.chipset).filter(Boolean) as string[])],
+  }), [version]); // eslint-disable-line react-hooks/exhaustive-deps
+  const saveForm = async (input: PartInput) => {
+    if (form?.part) { await savePart(form.part.id, input, pcComponents, PRESETS); toast.success('Pieza actualizada'); }
+    else { await createPart(input, pcComponents, PRESETS); toast.success('Pieza agregada al inventario'); }
+    refresh();
+  };
+  const removePart = async (c: PCComponent) => {
+    if (!window.confirm(`¿Eliminar "${c.name}" del inventario? Esta acción no se puede deshacer.\n\nSi la pieza solo está descontinuada, es mejor desactivarla con el interruptor.`)) return;
+    try { await deletePart(c.id, pcComponents, PRESETS); toast.success('Pieza eliminada'); refresh(); }
+    catch (e) { toast.error(e instanceof Error ? e.message : 'No se pudo eliminar'); }
+  };
 
   const [query, setQuery] = useState('');
   const [category, setCategory] = useState<ComponentCategory | 'all'>('all');
@@ -331,10 +349,13 @@ export function AdminPanel({ name, onLogout, onViewStore }: AdminPanelProps) {
                 <option value="low">Stock bajo</option>
               </select>
               <span className="text-gray-500">{rows.length} de {pcComponents.length} piezas</span>
+              <button onClick={() => setForm({})} className="ml-auto inline-flex items-center gap-2 rounded-lg bg-red-600 px-4 py-2 text-sm font-bold text-white shadow-lg shadow-red-600/30 transition hover:bg-red-500">
+                <Plus className="h-4 w-4" /> Nueva pieza
+              </button>
             </div>
 
             <div className="overflow-x-auto rounded-2xl border border-white/10">
-              <table className="w-full min-w-[900px] text-left text-sm">
+              <table className="w-full min-w-[1000px] text-left text-sm">
                 <thead className="bg-white/5 text-xs uppercase tracking-wider text-gray-400">
                   <tr>
                     <th className="px-4 py-3">Imagen</th>
@@ -343,6 +364,7 @@ export function AdminPanel({ name, onLogout, onViewStore }: AdminPanelProps) {
                     <th className="px-4 py-3">Precio (USD)</th>
                     <th className="px-4 py-3">Existencias</th>
                     <th className="px-4 py-3">Disponible</th>
+                    <th className="px-4 py-3">Acciones</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -395,20 +417,27 @@ export function AdminPanel({ name, onLogout, onViewStore }: AdminPanelProps) {
                           </button>
                           <span className="ml-2 text-xs text-gray-400">{on ? 'Sí' : 'No'}</span>
                         </td>
+                        <td className="px-4 py-3">
+                          <div className="flex gap-2">
+                            <button onClick={() => setForm({ part: c })} aria-label={`Editar ${c.name}`} title="Editar" className="rounded-lg border border-white/10 p-2 text-gray-300 hover:border-red-500/60 hover:text-white"><Pencil className="h-4 w-4" /></button>
+                            <button onClick={() => removePart(c)} aria-label={`Eliminar ${c.name}`} title="Eliminar" className="rounded-lg border border-white/10 p-2 text-gray-300 hover:border-red-500/60 hover:text-red-400"><Trash2 className="h-4 w-4" /></button>
+                          </div>
+                        </td>
                       </tr>
                     );
                   })}
                   {rows.length === 0 && (
-                    <tr><td colSpan={6} className="px-4 py-10 text-center text-gray-500">No hay piezas con ese filtro.</td></tr>
+                    <tr><td colSpan={7} className="px-4 py-10 text-center text-gray-500">No hay piezas con ese filtro.</td></tr>
                   )}
                 </tbody>
               </table>
             </div>
             <p className="mt-3 text-xs text-gray-500">
-              Los cambios se guardan en PostgreSQL y se ven al instante en el configurador de los clientes. Las piezas desactivadas dejan de mostrarse en el catálogo.
+              Los cambios se guardan en PostgreSQL y se ven al instante en el configurador de los clientes. Las piezas descontinuadas se desactivan con el interruptor (dejan de mostrarse sin perder su historial); solo se pueden eliminar las que nunca se han usado en pedidos, equipos o builds guardados.
             </p>
           </section>
         )}
+        {form && <PartFormDialog part={form.part} known={known} onClose={() => setForm(null)} onSave={saveForm} />}
       </main>
     </div>
   );

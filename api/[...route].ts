@@ -261,6 +261,90 @@ async function guardarImagen(id: string, dataUrl: unknown) {
   );
 }
 
+// ───────────── inventario: alta, edición y baja de piezas (solo administrador) ─────────────
+const RAM_TIPOS = ['DDR4', 'DDR5'];
+const FORMATOS = ['ATX', 'mATX', 'ITX'];
+function leerPieza(b: any) {
+  const categoria = String(b?.categoria ?? '');
+  if (!(CATS as readonly string[]).includes(categoria)) throw bad('Elige una categoría válida.');
+  const marca = text(b?.marca, 'La marca', 1, 40);
+  const nombre = text(b?.nombre, 'El nombre', 2, 120);
+  const precio = num(b?.precio);
+  if (!(Number.isFinite(precio) && precio >= 0 && precio < 1e6)) throw bad('Precio no válido.');
+  const existencias = num(b?.existencias ?? 0);
+  if (!(Number.isInteger(existencias) && existencias >= 0 && existencias < 1e6)) throw bad('Existencias no válidas.');
+  const calificacion = num(b?.calificacion ?? 4);
+  if (!(Number.isInteger(calificacion) && calificacion >= 1 && calificacion <= 5)) throw bad('La calificación va de 1 a 5.');
+  const especificaciones = typeof b?.especificaciones === 'string' ? b.especificaciones.trim().slice(0, 300) : '';
+  const etiqueta = typeof b?.etiqueta === 'string' && b.etiqueta.trim() ? b.etiqueta.trim().slice(0, 30) : null;
+  const opt = (v: unknown, max = 40) => (typeof v === 'string' && v.trim() ? v.trim().slice(0, max) : null);
+  const posInt = (v: unknown, field: string) => {
+    if (v === undefined || v === null || v === '') return null;
+    const n = num(v);
+    if (!(Number.isInteger(n) && n > 0 && n < 5000)) throw bad(`${field} no es válido.`);
+    return n;
+  };
+  // atributos de compatibilidad: solo se guardan los que corresponden a la categoría
+  let socket: string | null = null, chipset: string | null = null, tipo_ram: string | null = null, vatios: number | null = null,
+    formato: string | null = null, formatos: string[] | null = null, vatios_minimos: number | null = null, gpu_integrada: string | null = null;
+  if (categoria === 'cpu') {
+    socket = opt(b?.socket); if (!socket) throw bad('Indica el socket del procesador.');
+    gpu_integrada = opt(b?.gpu_integrada, 60);
+  } else if (categoria === 'motherboard') {
+    socket = opt(b?.socket); if (!socket) throw bad('Indica el socket de la placa base.');
+    chipset = opt(b?.chipset);
+    tipo_ram = String(b?.tipo_ram ?? ''); if (!RAM_TIPOS.includes(tipo_ram)) throw bad('Elige el tipo de RAM (DDR4 o DDR5).');
+    formato = String(b?.formato ?? ''); if (!FORMATOS.includes(formato)) throw bad('Elige el formato de la placa.');
+  } else if (categoria === 'ram') {
+    tipo_ram = String(b?.tipo_ram ?? ''); if (!RAM_TIPOS.includes(tipo_ram)) throw bad('Elige el tipo de RAM (DDR4 o DDR5).');
+  } else if (categoria === 'gpu') {
+    vatios_minimos = posInt(b?.vatios_minimos, 'Los vatios mínimos');
+  } else if (categoria === 'power') {
+    vatios = posInt(b?.vatios, 'Los vatios'); if (!vatios) throw bad('Indica la potencia de la fuente en vatios.');
+  } else if (categoria === 'case') {
+    formatos = Array.isArray(b?.formatos_soportados) ? b.formatos_soportados.filter((f: unknown) => typeof f === 'string' && FORMATOS.includes(f)) : [];
+    if (!formatos!.length) throw bad('Elige al menos un formato de placa que acepte el case.');
+  }
+  return { categoria, marca, nombre, precio, existencias, calificacion, especificaciones, etiqueta, socket, chipset, tipo_ram, vatios, formato, formatos, vatios_minimos, gpu_integrada };
+}
+const COLS = '(categoria,marca,nombre,precio,especificaciones,existencias,calificacion,etiqueta,socket,chipset,tipo_ram,vatios,formato,formatos_soportados,vatios_minimos,gpu_integrada)';
+const valsPieza = (p: ReturnType<typeof leerPieza>) => [p.categoria, p.marca, p.nombre, p.precio, p.especificaciones, p.existencias, p.calificacion, p.etiqueta, p.socket, p.chipset, p.tipo_ram, p.vatios, p.formato, p.formatos, p.vatios_minimos, p.gpu_integrada];
+
+async function crearPieza(req: Req) {
+  const p = leerPieza(req.body);
+  const pref = { cpu: 'cpu', motherboard: 'mb', ram: 'ram', gpu: 'gpu', storage: 'ssd', power: 'psu', case: 'case' }[p.categoria as typeof CATS[number]];
+  const ids = await q<{ id: string }>('SELECT id FROM componente WHERE categoria = $1', [p.categoria]);
+  let n = ids.reduce((m, r) => Math.max(m, Number(r.id.split('-').pop()) || 0), 0);
+  for (let i = 0; i < 5; i++) {
+    n++;
+    const id = `${pref}-${n}`;
+    const r = await q(`INSERT INTO componente (id,${COLS.slice(1)} VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17) ON CONFLICT (id) DO NOTHING RETURNING id`, [id, ...valsPieza(p)]);
+    if (r.length) return { id };
+  }
+  throw new HttpError(500, 'No se pudo generar el código de la pieza.');
+}
+async function editarPieza(id: string, req: Req) {
+  const p = leerPieza(req.body);
+  const prev = (await q('SELECT categoria FROM componente WHERE id = $1', [id]))[0];
+  if (!prev) throw new HttpError(404, 'Pieza no encontrada.');
+  if (prev.categoria !== p.categoria) throw bad('No se puede cambiar la categoría de una pieza existente; crea una nueva.');
+  await q(
+    `UPDATE componente SET marca=$2,nombre=$3,precio=$4,especificaciones=$5,existencias=$6,calificacion=$7,etiqueta=$8,socket=$9,chipset=$10,tipo_ram=$11,vatios=$12,formato=$13,formatos_soportados=$14,vatios_minimos=$15,gpu_integrada=$16 WHERE id=$1`,
+    [id, ...valsPieza(p).slice(1)],
+  );
+}
+async function eliminarPieza(id: string) {
+  const uso = (await q(
+    `SELECT (SELECT count(*) FROM pedido_item WHERE componente_id = $1)::int AS pedidos,
+            (SELECT count(*) FROM equipo_pieza WHERE componente_id = $1)::int AS equipos,
+            (SELECT count(*) FROM build_guardado, jsonb_each_text(piezas) WHERE value = $1)::int AS guardados`, [id]))[0];
+  if (uso.pedidos || uso.equipos || uso.guardados) {
+    throw new HttpError(409, 'Esta pieza ya se usa en pedidos, equipos o builds guardados. Márcala como no disponible (descontinuada) en lugar de eliminarla.');
+  }
+  const r = await q('DELETE FROM componente WHERE id = $1 RETURNING id', [id]);
+  if (!r.length) throw new HttpError(404, 'Pieza no encontrada.');
+}
+
 // ───────────── enrutador ─────────────
 async function route(req: Req, res: Res, seg: string[]) {
   const m = req.method ?? 'GET';
@@ -377,6 +461,9 @@ async function route(req: Req, res: Res, seg: string[]) {
     if (!r.length) throw new HttpError(404, 'Pieza no encontrada.');
     return ok({ ok: true });
   }
+  if (a === 'componentes' && !b && m === 'POST') { await requireAdmin(req); return ok(await crearPieza(req), 201); }
+  if (a === 'componentes' && b && m === 'PUT') { await requireAdmin(req); await editarPieza(b, req); return ok({ ok: true }); }
+  if (a === 'componentes' && b && m === 'DELETE') { await requireAdmin(req); await eliminarPieza(b); return ok({ ok: true }); }
   if (a === 'imagen' && b && m === 'PUT') { await requireAdmin(req); await guardarImagen(b, req.body?.dataUrl); return ok({ ok: true }); }
   if (a === 'imagen' && b && m === 'DELETE') { await requireAdmin(req); await q('DELETE FROM imagen WHERE componente_id = $1', [b]); return ok({ ok: true }); }
 
